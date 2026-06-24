@@ -8,6 +8,7 @@ Usage:
     python3 analyze_kifu.py --engine ./fairy-stockfish --kif-dir kifu_files/
     python3 analyze_kifu.py --engine ./fairy-stockfish --kif game.kif
 """
+import re
 import subprocess
 import shogi
 import shogi.KIF
@@ -114,6 +115,40 @@ def eval_bar(score: int, width: int = 30) -> str:
         for j in range(max(pos, 0), mid):
             bar[j] = "░"
     return "".join(bar)
+
+
+def annotate_kif(kif_text: str, move_records: list, evals: list,
+                 losses: list, blunder_thr: int, mistake_thr: int) -> str:
+    """KIFテキストの各指し手行の後に評価値コメントを挿入する"""
+    move_re = re.compile(r'^\s+(\d+)\s+\S')
+    eval_map = {}
+    for i, (num, turn, _) in enumerate(move_records):
+        sc_before = evals[i] if i < len(evals) else None
+        sc_after  = evals[i + 1] if i + 1 < len(evals) else None
+        lo = losses[i] if i < len(losses) else None
+        eval_map[num] = (turn, sc_before, sc_after, lo)
+
+    result = []
+    for line in kif_text.split("\n"):
+        result.append(line)
+        m = move_re.match(line)
+        if not m:
+            continue
+        num = int(m.group(1))
+        if num not in eval_map:
+            continue
+        turn, sc_before, sc_after, lo = eval_map[num]
+        sb = f"{sc_before:+d}" if sc_before is not None else "?"
+        sa = f"{sc_after:+d}" if sc_after is not None else "?"
+        comment = f"*評価値: {sb}→{sa}"
+        if lo is not None:
+            comment += f"  損失:{lo:+d}"
+            if lo >= blunder_thr:
+                comment += "  ★悪手★"
+            elif lo >= mistake_thr:
+                comment += "  ▲疑問手"
+        result.append(comment)
+    return "\n".join(result)
 
 
 def find_kif_list(kif_dir: Path) -> list[Path]:
@@ -345,10 +380,13 @@ def main():
     report = "\n".join(lines)
     Path(args.output).write_text(report, encoding="utf-8-sig")
 
-    import shutil
-    shutil.copy2(kif_path, args.output_kif)
+    annotated = annotate_kif(
+        kif_text, move_records, evals, losses,
+        BLUNDER_THRESHOLD, MISTAKE_THRESHOLD
+    )
+    Path(args.output_kif).write_text(annotated, encoding="utf-8-sig")
     print(f"\n解析完了 → {args.output}")
-    print(f"解析棋譜  → {args.output_kif} ({kif_path.name})")
+    print(f"解析棋譜  → {args.output_kif} ({kif_path.name}, コメント付き)")
     print(f"悪手:{len(blunders)}件  疑問手:{len(mistakes)}件")
     print()
     print(report)
