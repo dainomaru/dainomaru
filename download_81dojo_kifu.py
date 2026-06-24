@@ -71,10 +71,11 @@ def login(browser: mechanicalsoup.StatefulBrowser, user: str, pw: str) -> None:
 
 
 def get_game_ids(browser: mechanicalsoup.StatefulBrowser, target_user: str) -> list[str]:
-    """検索フォームを使って全対局IDを収集する（先手・後手の両方を検索）。"""
-    game_ids: set[str] = set()
+    """検索フォームを使って全対局IDを収集する（先手・後手の両方を検索）。
+    検索結果の順序（新しい順）を保持して返す。"""
+    seen: set[str] = set()
+    ordered: list[str] = []  # 新しい順を保持
 
-    # 先手(player1)と後手(player2)で2回検索してマージ
     for player_field in ["conditions[player1]", "conditions[player2]"]:
         browser.open(SEARCH_URL)
         browser.select_form()
@@ -95,22 +96,24 @@ def get_game_ids(browser: mechanicalsoup.StatefulBrowser, target_user: str) -> l
             continue
 
         rows  = table.find_all("tr")
-        before = len(game_ids)
+        added = 0
         for row in rows:
             for cell in row.find_all("td"):
                 for a in cell.find_all("a"):
                     href = a.get("href", "")
-                    # 英数字の対局ID を /kifus/{id} から抽出
                     m = re.search(r'/kifus/([A-Za-z0-9]+)', href)
                     if m:
-                        game_ids.add(m.group(1))
+                        gid = m.group(1)
+                        if gid not in seen:
+                            seen.add(gid)
+                            ordered.append(gid)
+                            added += 1
 
-        added = len(game_ids) - before
-        print(f"  {player_field}: {added} 件追加 (累計 {len(game_ids)} 件)")
+        print(f"  {player_field}: {added} 件追加 (累計 {len(ordered)} 件)")
 
-    result = sorted(game_ids)
-    print(f"  合計 {len(result)} 件の対局を発見")
-    return result
+    # 新しい順のまま返す（--max は先頭N件 = 最新N件）
+    print(f"  合計 {len(ordered)} 件の対局を発見")
+    return ordered
 
 
 def fetch_kif(session: requests.Session, game_id: str) -> str | None:
@@ -195,7 +198,7 @@ def main() -> None:
         sys.exit(1)
 
     if args.max > 0:
-        game_ids = game_ids[-args.max:]   # 最新N件
+        game_ids = game_ids[:args.max]   # 最新N件（検索結果は新しい順）
         print(f"最新 {args.max} 件に絞り込みました")
 
     # 棋譜ダウンロード（認証済みセッションで直接KIFを取得）

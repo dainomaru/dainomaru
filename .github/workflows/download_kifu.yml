@@ -50,9 +50,19 @@ jobs:
           echo "machine system.81dojo.com login ${{ secrets.DOJO_USER }} password ${{ secrets.DOJO_PASSWORD }}" > ~/.netrc
           chmod 600 ~/.netrc
 
+      - name: KIF キャッシュを復元
+        uses: actions/cache@v4
+        with:
+          path: kifu/${{ secrets.DOJO_USER }}/
+          key: kifu-${{ secrets.DOJO_USER }}-${{ github.run_id }}
+          restore-keys: |
+            kifu-${{ secrets.DOJO_USER }}-
+
       - name: 棋譜をダウンロード
         run: |
           MAX="${{ github.event.inputs.max_games || '0' }}"
+          CACHED=$(ls kifu/${{ secrets.DOJO_USER }}/*.kif 2>/dev/null | wc -l || echo 0)
+          echo "キャッシュ済み: ${CACHED} 件"
           if [ "$MAX" = "0" ]; then
             python3 download_81dojo_kifu.py --user ${{ secrets.DOJO_USER }}
           else
