@@ -23,6 +23,7 @@ MISTAKE_THRESHOLD = 100
 ENGINE_NAME = "Fairy-Stockfish-largeboard"
 MATE_SEARCH_THRESHOLD = 1500  # この評価値(cp)を超えたら詰み専用探索を追加実行
 MATE_SEARCH_PLIES = 31        # go mate N: 最大31手詰みまで探索
+MATE_SEARCH_MOVETIME = 2000   # 詰み探索のタイムアウト (ms) — 詰みなし局面のハング防止
 
 
 def normalize_move_usi(move: str) -> str:
@@ -130,7 +131,8 @@ class ShogiEngine:
         if self.proc.poll() is not None:
             return None
         self._send(f"position sfen {sfen}")
-        self._send(f"go mate {max_plies}")
+        # movetime で上限を設ける（詰みなし局面の無限探索を防止）
+        self._send(f"go mate {max_plies} movetime {MATE_SEARCH_MOVETIME}")
         best: dict | None = None
         while True:
             raw = self.proc.stdout.readline()
