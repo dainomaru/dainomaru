@@ -83,74 +83,107 @@ def get_game_ids(browser: mechanicalsoup.StatefulBrowser, target_user: str) -> l
         browser.open(SEARCH_URL)
         browser.select_form()
 
+        # 初回のみフォームフィールド名を出力（デバッグ用）
+        if oldest_date is None:
+            form_el = browser.get_current_form().form
+            field_names = [
+                el.get("name", "")
+                for el in form_el.find_all(["input", "select", "textarea"])
+                if el.get("name")
+            ]
+            print(f"  フォームフィールド: {field_names[:30]}")
+
         # プレイヤー名フィルタ（複数の可能なフィールド名を試みる）
-        for player_field in ["conditions[player_name]", "conditions[black_name]",
-                              "conditions[white_name]", "q[player_name_cont]"]:
+        player_set = False
+        for fname in ["conditions[player_name]", "conditions[black_name]",
+                      "conditions[white_name]", "q[player_name_cont]", "player_name"]:
             try:
-                browser[player_field] = target_user
+                browser[fname] = target_user
+                print(f"  プレイヤー名フィールド設定: {fname}")
+                player_set = True
+                break
+            except mechanicalsoup.utils.LinkNotFoundError:
+                pass
+        if not player_set:
+            print("  ⚠ プレイヤー名フィールドが見つかりませんでした（全棋譜対象）")
+
+        # 1970-01-01 から全件検索（D-Milesが必要な場合はフィールドが存在しない）
+        for fname in ["conditions[search_from]", "search_from"]:
+            try:
+                browser[fname] = "1970-01-01"
                 break
             except mechanicalsoup.utils.LinkNotFoundError:
                 pass
 
-        # 1970-01-01 から全件検索（D-Milesが必要な場合はフィールドが存在しない）
-        try:
-            browser["conditions[search_from]"] = "1970-01-01"
-        except mechanicalsoup.utils.LinkNotFoundError:
-            pass
-
         if oldest_date:
             print(f"  再検索 (〜{oldest_date}) ...")
-            try:
-                browser["conditions[search_until]"] = oldest_date
-            except mechanicalsoup.utils.LinkNotFoundError:
-                pass
+            for fname in ["conditions[search_until]", "search_until"]:
+                try:
+                    browser[fname] = oldest_date
+                    break
+                except mechanicalsoup.utils.LinkNotFoundError:
+                    pass
         else:
             print("  全対局を検索中...")
 
         browser.submit_selected()
         page  = browser.get_current_page()
+        print(f"  検索後URL: {browser.url}")
         table = page.find("table", class_="list")
 
         if not table:
             print("  検索テーブルが見つかりません。")
-            print(f"  現在のURL: {browser.url}")
+            tables = page.find_all("table")
+            print(f"  ページ内テーブル数: {len(tables)}")
+            for t in tables[:3]:
+                print(f"    class={t.get('class', [])} id={t.get('id', '')}")
             break
 
         rows = table.find_all("tr")
+        print(f"  テーブル行数: {len(rows)}")
+
+        # 最初の3行の構造を出力（デバッグ用）
+        for i, row in enumerate(rows[:3]):
+            cells = row.find_all(["td", "th"])
+            for j, cell in enumerate(cells):
+                links = [(a.get("href", ""), a.get_text(strip=True)[:15])
+                         for a in cell.find_all("a")]
+                if links:
+                    print(f"  行{i}列{j}: links={links}")
+
         new_found = False
+        row_date: str | None = None
         for row in rows:
             cells = row.find_all("td")
             if not cells:
                 continue
-            # 最終列のリンクに game_id が含まれる
-            link = cells[-1].find("a")
-            if not link:
-                continue
-            href = link.get("href", "")
-            # os.path.basename でパスの末尾を数値として取得
-            basename = os.path.basename(href.rstrip("/"))
-            try:
-                gid = int(basename)
-            except ValueError:
-                continue
-            if gid not in game_ids:
-                game_ids.add(gid)
-                new_found = True
-            # 最古の日付を追跡（ページング用）
-            oldest_date = next(cells[1].children, None)
-            if hasattr(oldest_date, "get_text"):
-                oldest_date = oldest_date.get_text(strip=True)
-            elif oldest_date:
-                oldest_date = str(oldest_date).strip()
+            # 全セルの全リンクから /kifus/数字 を抽出
+            for cell in cells:
+                for a in cell.find_all("a"):
+                    href = a.get("href", "")
+                    m = re.search(r'/kifus/(\d+)', href)
+                    if m:
+                        gid = int(m.group(1))
+                        if gid not in game_ids:
+                            game_ids.add(gid)
+                            new_found = True
+            # 日付追跡（2列目、ページング用）
+            if len(cells) > 1:
+                d = cells[1].get_text(strip=True)
+                if d:
+                    row_date = d
 
-        if not new_found and not game_ids:
-            print(f"  テーブルは見つかりましたが行が0件です。ページHTML(先頭500文字):")
-            print(f"  {str(page)[:500]}")
+        if row_date:
+            oldest_date = row_date
+
+        if not new_found:
+            if not game_ids:
+                print("  テーブルにゲームリンクなし。テーブルHTML(先頭800文字):")
+                print(f"  {str(table)[:800]}")
+            break
 
         # 上限に達した場合は oldest_date で再検索してページング
         if page.find(string=re.compile("Number of matching kifus reached")):
-            if not new_found:
-                break  # 無限ループ防止
             continue
 
         break
