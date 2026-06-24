@@ -294,7 +294,9 @@ def eval_bar(score: int, width: int = 30) -> str:
 def annotate_kif(kif_text: str, move_records: list,
                  boards_before: list[shogi.Board],
                  analysis_results: list[list[dict]]) -> str:
-    """KIF テキストの各指し手行の後に ShogiDroid 形式の *解析 コメントを挿入する"""
+    """KIF テキストの各指し手行の後に ShogiDroid 形式の **解析 コメントを挿入する。
+    lishogi 形式に合わせ: **Engines は最初の手のみ宣言、以降は **解析 のみ。
+    """
     move_re = re.compile(r'^\s*(\d+)\s+\S')
 
     analysis_map: dict[int, tuple] = {}
@@ -302,6 +304,8 @@ def annotate_kif(kif_text: str, move_records: list,
         analysis_map[num] = (turn, board, results)
 
     result = []
+    engine_declared = False
+
     for line in kif_text.split("\n"):
         result.append(line)
         m = move_re.match(line)
@@ -320,11 +324,13 @@ def annotate_kif(kif_text: str, move_records: list,
         score0 = c0["score"] if turn == shogi.BLACK else -c0["score"]
         pv0 = pv_to_kif(c0["pv"], board)
 
-        # 形勢グラフ用評価値コメント（先手視点: 正=先手有利）
-        result.append(f"*評価値:{score0}")
-        result.append(f"*Engines 0 {ENGINE_NAME}")
+        # **Engines 0 は最初の手のみ（lishogi形式）
+        if not engine_declared:
+            result.append(f"**Engines 0 {ENGINE_NAME}")
+            engine_declared = True
+
         result.append(
-            f"*解析 0  時間 {time_str} 深さ {c0['depth']}/{c0['seldepth']} "
+            f"**解析 0  時間 {time_str} 深さ {c0['depth']}/{c0['seldepth']} "
             f"ノード数 {c0['nodes']} 評価値 {score0} 読み筋 {pv0} "
         )
 
@@ -332,7 +338,7 @@ def annotate_kif(kif_text: str, move_records: list,
             score = cand["score"] if turn == shogi.BLACK else -cand["score"]
             pv = pv_to_kif(cand["pv"], board)
             result.append(
-                f"*解析 0  候補{i} 深さ {cand['depth']} 評価値 {score} 読み筋 {pv} "
+                f"**解析 0  候補{i} 深さ {cand['depth']} 評価値 {score} 読み筋 {pv} "
             )
 
     return "\n".join(result)
