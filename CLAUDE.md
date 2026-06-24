@@ -9,11 +9,13 @@ Android アプリ **ShogiDroid** で解析するための自動化ツール。
 
 ```
 download_81dojo_kifu.py   # メインスクリプト（81dojoログイン→棋譜取得→KIF変換→ZIP）
+analyze_kifu.py           # 棋譜解析スクリプト（Fairy-Stockfish→KIFコメント付き出力）
 test_kifu.py              # CI用テスト（CSA→KIF変換の動作確認）
 requirements.txt          # Python依存ライブラリ
 run.sh                    # ローカル実行用シェルスクリプト
 .github/workflows/
   download_kifu.yml       # 棋譜ダウンロードワークフロー（毎週月曜+手動）
+  analyze_kifu.yml        # 棋譜解析ワークフロー（手動トリガー）
   test.yml                # CIテストワークフロー（push時自動）
 ```
 
@@ -37,4 +39,19 @@ run.sh                    # ローカル実行用シェルスクリプト
 ## カスタムコマンド
 
 - `/kifu-download` — ダウンロードワークフローのトリガーと結果確認
-- `/kifu-status`  — 最新ワークフロー実行状況の確認
+- `/kifu-analyze`  — 解析ワークフローのトリガーと結果確認（analyzed_game.kif + analysis_report.txt）
+- `/kifu-status`   — 最新ワークフロー実行状況の確認
+
+## 解析ワークフローの出力（analyze_kifu.yml）
+
+解析実行後、GitHub Releases の最新タグに以下が追加される:
+
+| ファイル | 内容 |
+|---------|------|
+| `analyzed_game.kif` | 解析対象の棋譜1局（各手に `*評価値:` コメント挿入済み） |
+| `analysis_report.txt` | 悪手・疑問手一覧 + 評価値グラフ |
+| `dainomaru_kifu.zip` | 全棋譜 ZIP |
+
+- エンコード: UTF-8 with BOM（文字化け対策済み）
+- ブランチ: `claude/shogi-81dojo-analysis-019qha`
+- エンジン: Fairy-Stockfish largeboard（UCI_Variant shogi）
