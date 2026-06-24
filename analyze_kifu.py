@@ -196,8 +196,10 @@ def pv_to_kif(pv_usi: list[str], board: shogi.Board, max_moves: int = 8) -> str:
         usi = normalize_move_usi(raw_usi)
         try:
             kif_str = shogi.KIF.Exporter.kif_move_from(usi, b)
+            # ShogiDroid は短形式（移動元括弧なし）を要求するため (NN) を除去
+            kif_short = re.sub(r'\(\d+\)', '', kif_str)
             prefix = "▲" if b.turn == shogi.BLACK else "△"
-            parts.append(f"{prefix}{kif_str}")
+            parts.append(f"{prefix}{kif_short}")
             m = shogi.Move.from_usi(usi)
             if not m:
                 break
