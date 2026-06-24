@@ -8,7 +8,7 @@ Fairy-Stockfish エンジンで最新棋譜を解析し、評価値コメント�
    - method: `run_workflow`
    - workflow_id: `analyze_kifu.yml`
    - ref: `claude/shogi-81dojo-analysis-019qha`
-   - inputs: `{}`
+   - inputs: `{}` （最新棋譜）または `{"kif_skip": "1"}` （直近2つ目）
    - owner: `dainomaru`, repo: `dainomaru`
 
 2. 5〜10秒待ってから `mcp__github__actions_list` で最新 run_id を取得:
@@ -24,10 +24,22 @@ Fairy-Stockfish エンジンで最新棋譜を解析し、評価値コメント�
    - `analyzed_game.kif` — 解析対象の棋譜1局（各手に評価値コメント付き）
    - `analysis_report.txt` — 悪手・疑問手・評価値グラフのテキストレポート
 
-5. ダウンロード URL を案内:
-   - https://github.com/dainomaru/dainomaru/releases/tag/kifu-8
-   - analyzed_game.kif: https://github.com/dainomaru/dainomaru/releases/download/kifu-8/analyzed_game.kif
-   - analysis_report.txt: https://github.com/dainomaru/dainomaru/releases/download/kifu-8/analysis_report.txt
+5. ダウンロード URL を案内（最新タグ例: kifu-9）:
+   - https://github.com/dainomaru/dainomaru/releases/tag/kifu-9
+   - analyzed_game.kif: https://github.com/dainomaru/dainomaru/releases/download/kifu-9/analyzed_game.kif
+   - analysis_report.txt: https://github.com/dainomaru/dainomaru/releases/download/kifu-9/analysis_report.txt
+
+## ワークフロー入力パラメータ
+
+| パラメータ | デフォルト | 説明 |
+|-----------|-----------|------|
+| `movetime` | `1000` | 1手あたり解析時間 (ms) |
+| `kif_skip` | `0` | スキップする棋譜数 (0=最新, 1=直近2つ目, 2=直近3つ目...) |
+
+例: 直近2つ目の棋譜を解析する場合
+```
+inputs: {"kif_skip": "1"}
+```
 
 ## 出力ファイルの仕様
 
@@ -89,6 +101,7 @@ KIF コメント形式（ShogiDroid で開くと読み筋・形勢グラフ・�
 - 疑問手閾値: 損失 100〜299
 - MultiPV: 10候補（`**解析 0` + `**解析 0  候補2〜10`）
 - KIF 候補: 最新日付順に最大10件試し、有効な手がある最初のファイルを解析
+- `--skip N`: N件の有効棋譜をスキップ（0=最新, 1=直近2つ目, 2=直近3つ目）
 - 評価値: 常に先手（Black）視点に正規化
 - PV変換: `shogi.KIF.Exporter.kif_move_from(usi, board)` で USI→KIF 表記に変換
 - bestmove フォールバック: Fairy-Stockfish が `pv` を出力しない場合は `bestmove` 行を使用
