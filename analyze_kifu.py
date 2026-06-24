@@ -67,7 +67,8 @@ class ShogiEngine:
         self._send(f"position fen {sfen}")
         self._send(f"go movetime {self.movetime}")
         candidates: dict[int, dict] = {}
-        _dbg = getattr(self, '_dbg_done', False)
+        if not hasattr(self, '_raw_sample'):
+            self._raw_sample = []
         while True:
             raw = self.proc.stdout.readline()
             if not raw:
@@ -76,11 +77,8 @@ class ShogiEngine:
             if not line:
                 continue
             p = line.split()
-            if not _dbg and line.startswith("info"):
-                print(f"UCI_RAW: {line[:300]}", flush=True)
-                if "bestmove" in line or line.startswith("bestmove"):
-                    self._dbg_done = True
-                    _dbg = True
+            if len(self._raw_sample) < 5 and line.startswith("info") and "depth" in line:
+                self._raw_sample.append(line)
             if line.startswith("info") and "score" in line and "depth" in line:
                 try:
                     mid = int(p[p.index("multipv") + 1]) if "multipv" in p else 1
@@ -431,6 +429,11 @@ def main():
     print(f"\n解析完了 → {args.output}")
     print(f"解析棋譜  → {args.output_kif} ({kif_path.name}, ShogiDroid形式コメント付き)")
     print(f"悪手:{len(blunders)}件  疑問手:{len(mistakes)}件")
+
+    # DEBUG: UCI サンプル行を末尾に出力（ログ確認用）
+    for raw_line in getattr(engine, '_raw_sample', []):
+        print(f"UCI_SAMPLE: {raw_line[:400]}", flush=True)
+
     print()
     print(report)
 
