@@ -455,6 +455,7 @@ def main():
     parser.add_argument("--output-graph", default="evaluation_graph.html")
     parser.add_argument("--movetime",    type=int, default=1000, help="1手あたり解析時間 (ms)")
     parser.add_argument("--multipv",     type=int, default=10,  help="MultiPV 候補数")
+    parser.add_argument("--skip",        type=int, default=0,   help="スキップする有効棋譜数 (0=最新, 1=2番目に新しい, ...)")
     args = parser.parse_args()
 
     if args.kif:
@@ -471,16 +472,22 @@ def main():
     kif_text = ""
     game = {}
     moves = []
+    valid_count = 0
 
-    for candidate in kif_candidates[:10]:
+    for candidate in kif_candidates[:max(10, args.skip + 5)]:
         text = candidate.read_text(encoding="utf-8", errors="replace")
         g = parse_kif(text)
         raw = g.get("moves", [])
         m = extract_moves(raw)
 
         if m:
+            if valid_count < args.skip:
+                valid_count += 1
+                print(f"スキップ({valid_count}/{args.skip}): {candidate.name} ({len(m)}手)", flush=True)
+                continue
             kif_path, kif_text, game, moves = candidate, text, g, m
-            print(f"最新棋譜: {candidate.name} ({len(moves)}手)", flush=True)
+            ordinal = f"{args.skip + 1}番目に新しい" if args.skip > 0 else "最新"
+            print(f"{ordinal}棋譜: {candidate.name} ({len(moves)}手)", flush=True)
             break
         else:
             types_str = ", ".join(
@@ -490,7 +497,7 @@ def main():
             print(f"スキップ: {candidate.name} (raw={len(raw)}件, [{types_str}])", flush=True)
 
     if kif_path is None or not moves:
-        sys.exit("有効な棋譜が見つかりません (10件チェック済み)")
+        sys.exit(f"有効な棋譜が見つかりません (skip={args.skip})")
 
     names = game.get("names", [])
     if isinstance(names, list):

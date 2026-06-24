@@ -7,6 +7,10 @@ on:
         description: '1手あたり解析時間 (ms、短いほど速い・精度低)'
         required: false
         default: '1000'
+      kif_skip:
+        description: 'スキップする棋譜数 (0=最新, 1=2番目に新しい, 2=3番目...)'
+        required: false
+        default: '0'
 
 jobs:
   analyze:
@@ -50,14 +54,16 @@ jobs:
 
       - name: 棋譜を解析
         run: |
-          MOVETIME="${{ inputs.movetime || '300' }}"
-          echo "解析開始 (movetime=${MOVETIME}ms/手)"
+          MOVETIME="${{ inputs.movetime || '1000' }}"
+          KIF_SKIP="${{ inputs.kif_skip || '0' }}"
+          echo "解析開始 (movetime=${MOVETIME}ms/手, skip=${KIF_SKIP})"
           python3 analyze_kifu.py \
             --engine ./fairy-stockfish \
             --kif-dir kifu_files/ \
             --output analysis_report.txt \
             --output-kif analyzed_game.kif \
-            --movetime "$MOVETIME"
+            --movetime "$MOVETIME" \
+            --skip "$KIF_SKIP"
 
       - name: 解析レポートを Artifact として保存
         uses: actions/upload-artifact@v4
