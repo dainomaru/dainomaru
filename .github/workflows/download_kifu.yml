@@ -1,0 +1,93 @@
+name: 81dojo 棋譜ダウンロード
+
+on:
+  # 毎週月曜 午前9時(JST) に自動実行
+  schedule:
+    - cron: '0 0 * * 1'   # UTC 00:00 = JST 09:00
+  # 手動実行ボタン
+  workflow_dispatch:
+    inputs:
+      max_games:
+        description: '最大取得件数 (0=全件)'
+        required: false
+        default: '0'
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # リリース作成のため
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python セットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 依存ライブラリをインストール
+        run: pip install -r requirements.txt
+
+      - name: ~/.netrc を設定
+        run: |
+          echo "machine system.81dojo.com login ${{ secrets.DOJO_USER }} password ${{ secrets.DOJO_PASSWORD }}" > ~/.netrc
+          chmod 600 ~/.netrc
+
+      - name: 棋譜をダウンロード
+        run: |
+          MAX="${{ github.event.inputs.max_games || '0' }}"
+          if [ "$MAX" = "0" ]; then
+            python3 download_81dojo_kifu.py --user ${{ secrets.DOJO_USER }}
+          else
+            python3 download_81dojo_kifu.py --user ${{ secrets.DOJO_USER }} --max "$MAX"
+          fi
+
+      - name: ZIP ファイルを確認
+        id: check_zip
+        run: |
+          USER="${{ secrets.DOJO_USER }}"
+          ZIP="${USER}_kifu.zip"
+          if [ -f "$ZIP" ]; then
+            COUNT=$(unzip -l "$ZIP" | tail -1 | awk '{print $2}')
+            echo "zip_exists=true"  >> $GITHUB_OUTPUT
+            echo "zip_path=$ZIP"    >> $GITHUB_OUTPUT
+            echo "zip_count=$COUNT" >> $GITHUB_OUTPUT
+            echo "棋譜数: $COUNT 件"
+          else
+            echo "zip_exists=false" >> $GITHUB_OUTPUT
+            echo "ZIPが生成されませんでした"
+          fi
+
+      - name: GitHub Release にアップロード
+        if: steps.check_zip.outputs.zip_exists == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: kifu-${{ github.run_number }}
+          name: "棋譜 #${{ github.run_number }} (${{ github.run_id }})"
+          body: |
+            ## dainomaru の81dojo棋譜
+
+            - 取得日時: ${{ github.event.head_commit.timestamp || github.event.created_at }}
+            - 棋譜数: ${{ steps.check_zip.outputs.zip_count }} 件
+
+            ### ShogiDroidでの使い方
+            1. `${{ steps.check_zip.outputs.zip_path }}` をダウンロード
+            2. スマホに転送してZIPを解凍
+            3. ShogiDroid → 棋譜を開く → フォルダを選択
+          files: ${{ steps.check_zip.outputs.zip_path }}
+          make_latest: true
+
+      - name: Artifact としても保存（30日間）
+        if: steps.check_zip.outputs.zip_exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dainomaru-kifu-${{ github.run_number }}
+          path: ${{ steps.check_zip.outputs.zip_path }}
+          retention-days: 30
+
+      - name: ~/.netrc を削除（セキュリティ）
+        if: always()
+        run: rm -f ~/.netrc

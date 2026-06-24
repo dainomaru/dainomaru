@@ -3,7 +3,35 @@
 81dojoから **dainomaru** の全対局棋譜をダウンロードし、  
 Androidアプリ **ShogiDroid** で解析するためのツールです。
 
-## 必要環境
+## 方法1: GitHub Actions（推奨・PC不要）
+
+GitHubのSecretsに認証情報を登録するだけで、**毎週自動取得**できます。
+
+### Secretsの設定
+
+1. GitHub → このリポジトリ → **Settings → Secrets and variables → Actions**
+2. 「New repository secret」で以下を追加:
+
+| Secret名 | 値 |
+|---|---|
+| `DOJO_USER` | 81dojoのユーザー名（例: `dainomaru`） |
+| `DOJO_PASSWORD` | 81dojoのパスワード |
+
+### ワークフロー実行
+
+- **自動**: 毎週月曜 午前9時(JST) に自動実行
+- **手動**: GitHub → Actions → 「81dojo 棋譜ダウンロード」→ 「Run workflow」
+
+### ZIPの取得方法
+
+実行完了後、GitHubの **Releases** ページに `dainomaru_kifu.zip` が公開されます。  
+スマホのブラウザから直接ダウンロード可能です。
+
+---
+
+## 方法2: ローカルPC実行
+
+### 必要環境
 
 - Python 3.9+
 - 81dojoのアカウント（自分のアカウントでログインして取得）

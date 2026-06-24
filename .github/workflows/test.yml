@@ -1,0 +1,59 @@
+name: スクリプト動作テスト
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python セットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 依存ライブラリをインストール
+        run: pip install -r requirements.txt
+
+      - name: 構文チェック
+        run: python3 -m py_compile download_81dojo_kifu.py
+
+      - name: CSA→KIF変換テスト
+        run: |
+          python3 - <<'EOF'
+          import shogi.CSA, shogi.KIF
+
+          sample_csa = """V2.2
+          N+dainomaru
+          N-opponent
+          P1-KY-KE-GI-KI-OU-KI-GI-KE-KY
+          P2 * -HI *  *  *  *  * -KA *
+          P3-FU-FU-FU-FU-FU-FU-FU-FU-FU
+          P4 *  *  *  *  *  *  *  *  *
+          P5 *  *  *  *  *  *  *  *  *
+          P6 *  *  *  *  *  *  *  *  *
+          P7+FU+FU+FU+FU+FU+FU+FU+FU+FU
+          P8 * +KA *  *  *  *  * +HI *
+          P9+KY+KE+GI+KI+OU+KI+GI+KE+KY
+          +
+          +2726FU
+          T5
+          -8384FU
+          T4
+          %TORYO
+          """
+
+          games = shogi.CSA.Parser.parse_str(sample_csa.strip())
+          assert games, "CSA解析失敗"
+          kif = shogi.KIF.Exporter().kif(games[0])
+          assert "dainomaru" in kif, "先手名が含まれていない"
+          assert "２六歩" in kif, "手順が含まれていない"
+          print("CSA→KIF変換: OK")
+          print(kif)
+          EOF
