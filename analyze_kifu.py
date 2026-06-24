@@ -195,13 +195,15 @@ def annotate_kif(kif_text: str, move_records: list,
         if not candidates:
             continue
 
-        result.append(f"*Engines 0 {ENGINE_NAME}")
-
         c0 = candidates[0]
         ts = c0["time_ms"] / 1000
         time_str = f"{int(ts // 60):02d}:{ts % 60:04.1f}"
         score0 = c0["score"] if turn == shogi.BLACK else -c0["score"]
         pv0 = pv_to_kif(c0["pv"], board)
+
+        # 形勢グラフ用評価値コメント（先手視点: 正=先手有利）
+        result.append(f"*評価値:{score0}")
+        result.append(f"*Engines 0 {ENGINE_NAME}")
         result.append(
             f"*解析 0  時間 {time_str} 深さ {c0['depth']}/{c0['seldepth']} "
             f"ノード数 {c0['nodes']} 評価値 {score0} 読み筋 {pv0} "
