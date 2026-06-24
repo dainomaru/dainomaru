@@ -24,7 +24,7 @@ ENGINE_NAME = "Fairy-Stockfish-largeboard"
 
 
 class ShogiEngine:
-    """Fairy-Stockfish との UCI 通信"""
+    """Fairy-Stockfish との USI 通信（将棋ネイティブプロトコル）"""
 
     def __init__(self, path: str, movetime_ms: int, multipv: int = 10):
         self.movetime = movetime_ms
@@ -37,9 +37,8 @@ class ShogiEngine:
             text=True,
             bufsize=1,
         )
-        self._send("uci")
-        self._wait("uciok")
-        self._send("setoption name UCI_Variant value shogi")
+        self._send("usi")
+        self._wait("usiok")
         self._send(f"setoption name MultiPV value {multipv}")
         self._send("isready")
         self._wait("readyok")
@@ -64,11 +63,9 @@ class ShogiEngine:
         """MultiPV 解析。候補手リスト (multipv id 昇順) を返す。"""
         if self.proc.poll() is not None:
             return []
-        self._send(f"position fen {sfen}")
+        self._send(f"position sfen {sfen}")
         self._send(f"go movetime {self.movetime}")
         candidates: dict[int, dict] = {}
-        if not hasattr(self, '_raw_sample'):
-            self._raw_sample = []
         while True:
             raw = self.proc.stdout.readline()
             if not raw:
@@ -77,8 +74,6 @@ class ShogiEngine:
             if not line:
                 continue
             p = line.split()
-            if len(self._raw_sample) < 5 and line.startswith("info") and "depth" in line:
-                self._raw_sample.append(line)
             if line.startswith("info") and "score" in line and "depth" in line:
                 try:
                     mid = int(p[p.index("multipv") + 1]) if "multipv" in p else 1
@@ -429,10 +424,6 @@ def main():
     print(f"\n解析完了 → {args.output}")
     print(f"解析棋譜  → {args.output_kif} ({kif_path.name}, ShogiDroid形式コメント付き)")
     print(f"悪手:{len(blunders)}件  疑問手:{len(mistakes)}件")
-
-    # DEBUG: UCI サンプル行を末尾に出力（ログ確認用）
-    for raw_line in getattr(engine, '_raw_sample', []):
-        print(f"UCI_SAMPLE: {raw_line[:400]}", flush=True)
 
     print()
     print(report)
