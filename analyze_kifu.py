@@ -58,7 +58,10 @@ class ShogiEngine:
         self._send(f"go movetime {self.movetime}")
         score = None
         while True:
-            line = self.proc.stdout.readline().strip()
+            raw = self.proc.stdout.readline()
+            if not raw:  # EOF: エンジンが終了した
+                break
+            line = raw.strip()
             if not line:
                 continue
             p = line.split()
