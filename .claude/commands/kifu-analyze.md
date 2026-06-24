@@ -16,8 +16,9 @@ Fairy-Stockfish エンジンで最新棋譜を解析し、評価値コメント�
    - レスポンスが大きい場合はファイルに保存されるので python3 で run_id を抽出する
 
 3. `mcp__github__actions_list` で進行状況を監視（list_workflow_jobs で run_id を指定）:
-   - 解析ステップは約 40〜60 秒かかる（129手 × 300ms）
+   - 解析ステップは約 3〜6 分かかる（129手 × 1000ms + 詰み探索）
    - ScheduleWakeup(270s) で自動確認
+   - **10分以上 in_progress なら詰み探索ハングの疑い** → cancel してリトライ
 
 4. 完了後、`mcp__github__get_latest_release` でリリースアセットを確認:
    - `analyzed_game.kif` — 解析対象の棋譜1局（各手に評価値コメント付き）
@@ -55,6 +56,12 @@ KIF コメント形式（ShogiDroid で開くと読み筋・形勢グラフ・�
 - `**解析 0  ...` — 各手の最善候補（ダブルアスタリスク必須）
 - `**解析 0  候補2〜10` — MultiPV 10候補
 - `評価値` — 常に先手（Black）視点に正規化（正=先手有利、負=後手有利）
+- 詰み確定局面は `評価値 ±30000` ＋ `*先手/後手玉詰みN手` コメントを追加挿入:
+  ```
+  **解析 0  時間 00:01.0 深さ 15/15 ノード数 ... 評価値 -30000 読み筋 △７七角(88) ...
+  *先手玉詰み15手
+  N    ▲指し手
+  ```
 
 **重要**: ShogiDroid の形勢グラフ・解析パネルは `**`（ダブルアスタリスク）形式が必要。
 `*`（シングルアスタリスク）だと通常コメントとして扱われ、グラフが表示されない。
@@ -67,6 +74,7 @@ KIF コメント形式（ShogiDroid で開くと読み筋・形勢グラフ・�
 | 症状 | 原因 | 対処 |
 |------|------|------|
 | 解析ステップが数分以上 in_progress のまま | API キャッシュで stale 表示 / エンジンクラッシュ | ScheduleWakeup で継続監視。10分超えたら cancel してリトライ |
+| 解析が10分超えてハング | `go mate N` が詰みなし局面を無限探索 | 修正済み（`go mate 31 movetime 2000` でタイムアウト設定） |
 | `BrokenPipeError` で失敗 | Fairy-Stockfish が途中クラッシュ | 修正済み（eval で proc.poll() 確認、_send で BrokenPipeError キャッチ） |
 | 解析ステップが無限ハング | readline() の EOF 未検出 | 修正済み（raw が空なら break） |
 | 文字化け | UTF-8 未認識 | 修正済み（utf-8-sig で保存） |
@@ -86,3 +94,8 @@ KIF コメント形式（ShogiDroid で開くと読み筋・形勢グラフ・�
 - bestmove フォールバック: Fairy-Stockfish が `pv` を出力しない場合は `bestmove` 行を使用
 - HTMLグラフ: `generate_eval_graph_html()` で SVG 形勢グラフを生成し `evaluation_graph.html` に出力
 - 解析ブロック配置: `annotate_kif()` は指し手行の**前**に解析ブロックを挿入（lishogi形式）
+- **詰み専用探索**: 評価値 ±1500cp 超の局面で追加実行
+  - `go mate 31 movetime 2000`（最大31手詰み、2秒タイムアウト）
+  - 詰みが見つかれば `評価値 ±30000` に更新し `*先手/後手玉詰みN手` コメントを挿入
+  - movetime 上限必須: なしだと詰みなし局面で無限ハング
+- **デフォルト movetime**: 1000ms/手（`--movetime` 引数で変更可）
