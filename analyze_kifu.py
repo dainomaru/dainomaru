@@ -116,9 +116,7 @@ class ShogiEngine:
             if line.startswith("bestmove"):
                 parts_bm = line.split()
                 if len(parts_bm) >= 2 and parts_bm[1] not in ("(none)", "0000", "resign", "win"):
-                    raw_bm = parts_bm[1]
-                    bm = normalize_move_usi(raw_bm)
-                    print(f"DBG_BM raw={raw_bm!r} norm={bm!r}", flush=True)
+                    bm = normalize_move_usi(parts_bm[1])
                     if 1 in candidates and not candidates[1]["pv"]:
                         candidates[1]["pv"] = [bm]
                 break
@@ -146,15 +144,14 @@ def pv_to_kif(pv_usi: list[str], board: shogi.Board, max_moves: int = 8) -> str:
     for raw_usi in pv_usi[:max_moves]:
         usi = normalize_move_usi(raw_usi)
         try:
+            kif_str = shogi.KIF.Exporter.kif_move_from(usi, b)
+            prefix = "▲" if b.turn == shogi.BLACK else "△"
+            parts.append(f"{prefix}{kif_str}")
             m = shogi.Move.from_usi(usi)
             if not m:
-                print(f"DBG_PV from_usi({usi!r}) returned falsy", flush=True)
                 break
-            prefix = "▲" if b.turn == shogi.BLACK else "△"
-            parts.append(f"{prefix}{shogi.KIF.move_to_kif(m, b)}")
             b.push(m)
-        except Exception as e:
-            print(f"DBG_PV exception usi={usi!r}: {e}", flush=True)
+        except Exception:
             break
     return " ".join(parts)
 
@@ -337,7 +334,8 @@ def main():
     for i, move in enumerate(moves):
         turn = board.turn
         try:
-            kif_label = shogi.KIF.move_to_kif(move, board)
+            usi_str = move.usi() if hasattr(move, 'usi') else shogi.Move(move).usi()
+            kif_label = shogi.KIF.Exporter.kif_move_from(usi_str, board)
         except Exception:
             kif_label = f"手{i+1}"
 
