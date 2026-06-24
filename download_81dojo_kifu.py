@@ -74,7 +74,7 @@ def login(browser: mechanicalsoup.StatefulBrowser, user: str, pw: str) -> None:
     print("ログイン成功")
 
 
-def get_game_ids(browser: mechanicalsoup.StatefulBrowser) -> list[int]:
+def get_game_ids(browser: mechanicalsoup.StatefulBrowser, target_user: str) -> list[int]:
     """検索フォームを使って全対局IDを収集する。"""
     game_ids: set[int] = set()
     oldest_date: str | None = None
@@ -83,15 +83,27 @@ def get_game_ids(browser: mechanicalsoup.StatefulBrowser) -> list[int]:
         browser.open(SEARCH_URL)
         browser.select_form()
 
-        # 1970-01-01 から全件検索
+        # プレイヤー名フィルタ（複数の可能なフィールド名を試みる）
+        for player_field in ["conditions[player_name]", "conditions[black_name]",
+                              "conditions[white_name]", "q[player_name_cont]"]:
+            try:
+                browser[player_field] = target_user
+                break
+            except mechanicalsoup.utils.LinkNotFoundError:
+                pass
+
+        # 1970-01-01 から全件検索（D-Milesが必要な場合はフィールドが存在しない）
         try:
             browser["conditions[search_from]"] = "1970-01-01"
         except mechanicalsoup.utils.LinkNotFoundError:
-            pass  # D-Milesが足りない場合は日付指定不可
+            pass
 
         if oldest_date:
             print(f"  再検索 (〜{oldest_date}) ...")
-            browser["conditions[search_until]"] = oldest_date
+            try:
+                browser["conditions[search_until]"] = oldest_date
+            except mechanicalsoup.utils.LinkNotFoundError:
+                pass
         else:
             print("  全対局を検索中...")
 
@@ -100,7 +112,8 @@ def get_game_ids(browser: mechanicalsoup.StatefulBrowser) -> list[int]:
         table = page.find("table", class_="list")
 
         if not table:
-            print("  検索テーブルが見つかりません。ログイン状態を確認してください。")
+            print("  検索テーブルが見つかりません。")
+            print(f"  現在のURL: {browser.url}")
             break
 
         rows = table.find_all("tr")
@@ -113,10 +126,13 @@ def get_game_ids(browser: mechanicalsoup.StatefulBrowser) -> list[int]:
             link = cells[-1].find("a")
             if not link:
                 continue
-            m = re.search(r"/(\d+)$", link.get("href", ""))
-            if not m:
+            href = link.get("href", "")
+            # os.path.basename でパスの末尾を数値として取得
+            basename = os.path.basename(href.rstrip("/"))
+            try:
+                gid = int(basename)
+            except ValueError:
                 continue
-            gid = int(m.group(1))
             if gid not in game_ids:
                 game_ids.add(gid)
                 new_found = True
@@ -126,6 +142,10 @@ def get_game_ids(browser: mechanicalsoup.StatefulBrowser) -> list[int]:
                 oldest_date = oldest_date.get_text(strip=True)
             elif oldest_date:
                 oldest_date = str(oldest_date).strip()
+
+        if not new_found and not game_ids:
+            print(f"  テーブルは見つかりましたが行が0件です。ページHTML(先頭500文字):")
+            print(f"  {str(page)[:500]}")
 
         # 上限に達した場合は oldest_date で再検索してページング
         if page.find(string=re.compile("Number of matching kifus reached")):
@@ -263,7 +283,7 @@ def main() -> None:
 
     # 対局ID収集
     print("\n[1/3] 対局IDを収集中...")
-    game_ids = get_game_ids(browser)
+    game_ids = get_game_ids(browser, args.user)
     browser.close()
 
     if not game_ids:
