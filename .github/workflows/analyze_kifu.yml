@@ -64,3 +64,15 @@ jobs:
           name: shogi-analysis-${{ github.run_number }}
           path: analysis_report.txt
           retention-days: 30
+
+      - name: 解析レポートを Release にアップロード
+        run: |
+          TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' \
+            --repo "${{ github.repository }}")
+          echo "最新リリースタグ: $TAG"
+          gh release upload "$TAG" analysis_report.txt \
+            --clobber \
+            --repo "${{ github.repository }}"
+          echo "analysis_report.txt をリリース ${TAG} にアップロードしました"
+        env:
+          GH_TOKEN: ${{ github.token }}
