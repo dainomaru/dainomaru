@@ -1,0 +1,66 @@
+name: 将棋棋譜解析
+
+on:
+  workflow_dispatch:
+    inputs:
+      movetime:
+        description: '1手あたり解析時間 (ms、短いほど速い・精度低)'
+        required: false
+        default: '300'
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python セットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 依存ライブラリをインストール
+        run: pip install python-shogi
+
+      - name: Fairy-Stockfish をダウンロード
+        run: |
+          echo "Fairy-Stockfish (largeboard / shogi対応) をダウンロード中..."
+          wget -q -O fairy-stockfish \
+            "https://github.com/fairy-stockfish/Fairy-Stockfish/releases/download/fairy_sf_14/fairy-stockfish-largeboard_x86-64-modern"
+          chmod +x fairy-stockfish
+          echo "ダウンロード完了 ($(du -sh fairy-stockfish | cut -f1))"
+
+      - name: 最新棋譜 ZIP をダウンロード
+        run: |
+          echo "最新 Release から棋譜 ZIP を取得..."
+          gh release download \
+            --pattern "dainomaru_kifu.zip" \
+            --repo "${{ github.repository }}" \
+            --output dainomaru_kifu.zip \
+            --clobber
+          unzip -q dainomaru_kifu.zip -d kifu_files/
+          echo "KIF ファイル数: $(ls kifu_files/*.kif | wc -l) 件"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: 棋譜を解析
+        run: |
+          MOVETIME="${{ inputs.movetime || '300' }}"
+          echo "解析開始 (movetime=${MOVETIME}ms/手)"
+          python3 analyze_kifu.py \
+            --engine ./fairy-stockfish \
+            --kif-dir kifu_files/ \
+            --output analysis_report.txt \
+            --movetime "$MOVETIME"
+
+      - name: 解析レポートを Artifact として保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: shogi-analysis-${{ github.run_number }}
+          path: analysis_report.txt
+          retention-days: 30
