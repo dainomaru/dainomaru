@@ -56,6 +56,7 @@ jobs:
             --engine ./fairy-stockfish \
             --kif-dir kifu_files/ \
             --output analysis_report.txt \
+            --output-kif analyzed_game.kif \
             --movetime "$MOVETIME"
 
       - name: 解析レポートを Artifact として保存
@@ -65,14 +66,14 @@ jobs:
           path: analysis_report.txt
           retention-days: 30
 
-      - name: 解析レポートを Release にアップロード
+      - name: 解析レポートと棋譜を Release にアップロード
         run: |
           TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' \
             --repo "${{ github.repository }}")
           echo "最新リリースタグ: $TAG"
-          gh release upload "$TAG" analysis_report.txt \
+          gh release upload "$TAG" analysis_report.txt analyzed_game.kif \
             --clobber \
             --repo "${{ github.repository }}"
-          echo "analysis_report.txt をリリース ${TAG} にアップロードしました"
+          echo "analysis_report.txt / analyzed_game.kif をリリース ${TAG} にアップロードしました"
         env:
           GH_TOKEN: ${{ github.token }}

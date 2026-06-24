@@ -167,7 +167,8 @@ def main():
     parser.add_argument("--engine",   required=True, help="Fairy-Stockfish のパス")
     parser.add_argument("--kif",      help="解析する KIF ファイル")
     parser.add_argument("--kif-dir",  help="KIF ディレクトリ (最新を自動選択)")
-    parser.add_argument("--output",   default="analysis_report.txt")
+    parser.add_argument("--output",     default="analysis_report.txt")
+    parser.add_argument("--output-kif", default="analyzed_game.kif", help="解析対象KIFのコピー先")
     parser.add_argument("--movetime", type=int, default=300, help="1手あたり解析時間 (ms)")
     args = parser.parse_args()
 
@@ -344,7 +345,10 @@ def main():
     report = "\n".join(lines)
     Path(args.output).write_text(report, encoding="utf-8-sig")
 
+    import shutil
+    shutil.copy2(kif_path, args.output_kif)
     print(f"\n解析完了 → {args.output}")
+    print(f"解析棋譜  → {args.output_kif} ({kif_path.name})")
     print(f"悪手:{len(blunders)}件  疑問手:{len(mistakes)}件")
     print()
     print(report)
