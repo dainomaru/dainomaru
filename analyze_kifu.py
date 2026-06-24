@@ -98,6 +98,13 @@ class ShogiEngine:
                 except (ValueError, IndexError):
                     pass
             if line.startswith("bestmove"):
+                parts_bm = line.split()
+                if len(parts_bm) >= 2 and parts_bm[1] not in ("(none)", "0000"):
+                    bm = parts_bm[1]
+                    # Fairy-Stockfish shogi USI does not output pv field;
+                    # use bestmove as fallback for the top candidate
+                    if 1 in candidates and not candidates[1]["pv"]:
+                        candidates[1]["pv"] = [bm]
                 break
         return [candidates[k] for k in sorted(candidates.keys())]
 
