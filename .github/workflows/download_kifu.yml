@@ -31,6 +31,20 @@ jobs:
       - name: 依存ライブラリをインストール
         run: pip install -r requirements.txt
 
+      - name: シークレットの確認
+        run: |
+          if [ -z "${{ secrets.DOJO_USER }}" ] || [ -z "${{ secrets.DOJO_PASSWORD }}" ]; then
+            echo "ERROR: DOJO_USER または DOJO_PASSWORD が設定されていません。"
+            echo ""
+            echo "設定方法:"
+            echo "  GitHub → リポジトリ → Settings → Secrets and variables → Actions"
+            echo "  → New repository secret で以下を追加:"
+            echo "    DOJO_USER    : 81dojoのユーザー名"
+            echo "    DOJO_PASSWORD: 81dojoのパスワード"
+            exit 1
+          fi
+          echo "シークレット確認OK (user=${{ secrets.DOJO_USER }})"
+
       - name: ~/.netrc を設定
         run: |
           echo "machine system.81dojo.com login ${{ secrets.DOJO_USER }} password ${{ secrets.DOJO_PASSWORD }}" > ~/.netrc
