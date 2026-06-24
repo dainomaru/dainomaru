@@ -74,126 +74,50 @@ def login(browser: mechanicalsoup.StatefulBrowser, user: str, pw: str) -> None:
     print("ログイン成功")
 
 
-def get_game_ids(browser: mechanicalsoup.StatefulBrowser, target_user: str) -> list[int]:
-    """検索フォームを使って全対局IDを収集する。"""
-    game_ids: set[int] = set()
-    oldest_date: str | None = None
+def get_game_ids(browser: mechanicalsoup.StatefulBrowser, target_user: str) -> list[str]:
+    """検索フォームを使って全対局IDを収集する（先手・後手の両方を検索）。"""
+    game_ids: set[str] = set()
 
-    while True:
+    # 先手(player1)と後手(player2)で2回検索してマージ
+    for player_field in ["conditions[player1]", "conditions[player2]"]:
         browser.open(SEARCH_URL)
         browser.select_form()
 
-        # 初回のみフォームフィールド名を出力（デバッグ用）
-        if oldest_date is None:
-            form_el = browser.get_current_form().form
-            field_names = [
-                el.get("name", "")
-                for el in form_el.find_all(["input", "select", "textarea"])
-                if el.get("name")
-            ]
-            print(f"  フォームフィールド: {field_names[:30]}")
+        try:
+            browser[player_field] = target_user
+        except mechanicalsoup.utils.LinkNotFoundError:
+            print(f"  フィールドなし: {player_field}")
+            continue
 
-        # プレイヤー名フィルタ（複数の可能なフィールド名を試みる）
-        player_set = False
-        for fname in ["conditions[player_name]", "conditions[black_name]",
-                      "conditions[white_name]", "q[player_name_cont]", "player_name"]:
-            try:
-                browser[fname] = target_user
-                print(f"  プレイヤー名フィールド設定: {fname}")
-                player_set = True
-                break
-            except mechanicalsoup.utils.LinkNotFoundError:
-                pass
-        if not player_set:
-            print("  ⚠ プレイヤー名フィールドが見つかりませんでした（全棋譜対象）")
-
-        # 1970-01-01 から全件検索（D-Milesが必要な場合はフィールドが存在しない）
-        for fname in ["conditions[search_from]", "search_from"]:
-            try:
-                browser[fname] = "1970-01-01"
-                break
-            except mechanicalsoup.utils.LinkNotFoundError:
-                pass
-
-        if oldest_date:
-            print(f"  再検索 (〜{oldest_date}) ...")
-            for fname in ["conditions[search_until]", "search_until"]:
-                try:
-                    browser[fname] = oldest_date
-                    break
-                except mechanicalsoup.utils.LinkNotFoundError:
-                    pass
-        else:
-            print("  全対局を検索中...")
-
+        print(f"  検索中 ({player_field}={target_user})...")
         browser.submit_selected()
         page  = browser.get_current_page()
-        print(f"  検索後URL: {browser.url}")
         table = page.find("table", class_="list")
 
         if not table:
-            print("  検索テーブルが見つかりません。")
-            tables = page.find_all("table")
-            print(f"  ページ内テーブル数: {len(tables)}")
-            for t in tables[:3]:
-                print(f"    class={t.get('class', [])} id={t.get('id', '')}")
-            break
-
-        rows = table.find_all("tr")
-        print(f"  テーブル行数: {len(rows)}")
-
-        # 最初の3行の構造を出力（デバッグ用）
-        for i, row in enumerate(rows[:3]):
-            cells = row.find_all(["td", "th"])
-            for j, cell in enumerate(cells):
-                links = [(a.get("href", ""), a.get_text(strip=True)[:15])
-                         for a in cell.find_all("a")]
-                if links:
-                    print(f"  行{i}列{j}: links={links}")
-
-        new_found = False
-        row_date: str | None = None
-        for row in rows:
-            cells = row.find_all("td")
-            if not cells:
-                continue
-            # 全セルの全リンクから /kifus/数字 を抽出
-            for cell in cells:
-                for a in cell.find_all("a"):
-                    href = a.get("href", "")
-                    m = re.search(r'/kifus/(\d+)', href)
-                    if m:
-                        gid = int(m.group(1))
-                        if gid not in game_ids:
-                            game_ids.add(gid)
-                            new_found = True
-            # 日付追跡（2列目、ページング用）
-            if len(cells) > 1:
-                d = cells[1].get_text(strip=True)
-                if d:
-                    row_date = d
-
-        if row_date:
-            oldest_date = row_date
-
-        if not new_found:
-            if not game_ids:
-                print("  テーブルにゲームリンクなし。テーブルHTML(先頭800文字):")
-                print(f"  {str(table)[:800]}")
-            break
-
-        # 上限に達した場合は oldest_date で再検索してページング
-        if page.find(string=re.compile("Number of matching kifus reached")):
+            print(f"  テーブルなし ({player_field})")
             continue
 
-        break
+        rows  = table.find_all("tr")
+        before = len(game_ids)
+        for row in rows:
+            for cell in row.find_all("td"):
+                for a in cell.find_all("a"):
+                    href = a.get("href", "")
+                    # 英数字の対局ID を /kifus/{id} から抽出
+                    m = re.search(r'/kifus/([A-Za-z0-9]+)', href)
+                    if m:
+                        game_ids.add(m.group(1))
+
+        added = len(game_ids) - before
+        print(f"  {player_field}: {added} 件追加 (累計 {len(game_ids)} 件)")
 
     result = sorted(game_ids)
     print(f"  合計 {len(result)} 件の対局を発見")
     return result
 
 
-def fetch_game_json(session: requests.Session, game_id: int) -> dict | None:
+def fetch_game_json(session: requests.Session, game_id: str) -> dict | None:
     """APIから1対局のJSONを取得する。"""
     url = KIFU_API_URL.format(game_id)
     try:
@@ -206,7 +130,7 @@ def fetch_game_json(session: requests.Session, game_id: int) -> dict | None:
         return None
 
 
-def csa_to_kif(csa_content: str, game_id: int) -> str | None:
+def csa_to_kif(csa_content: str, game_id: str) -> str | None:
     """CSA文字列をKIF文字列に変換する。変換失敗時は None を返す。"""
     # 'ILLEGAL_MOVE 行と直前の2手を除去（python-shogi がエラーになるため）
     lines = []
@@ -232,7 +156,7 @@ def csa_to_kif(csa_content: str, game_id: int) -> str | None:
         return None
 
 
-def save_game(data: dict, game_id: int, out_dir: Path, use_csa: bool) -> Path | None:
+def save_game(data: dict, game_id: str, out_dir: Path, use_csa: bool) -> Path | None:
     """1対局を KIF または CSA ファイルとして保存する。"""
     contents: str = data.get("contents", "")
     if not contents:
