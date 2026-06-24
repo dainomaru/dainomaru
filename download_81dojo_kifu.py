@@ -11,14 +11,12 @@ KIF形式でダウンロードしてShogiDroid用ZIPにまとめます。
 使い方:
     python3 download_81dojo_kifu.py
     python3 download_81dojo_kifu.py --max 30   # 最新30局のみ
-    python3 download_81dojo_kifu.py --csa       # KIF変換せずCSAで保存
 
 参考: https://github.com/agt-the-walker/shogi-utils
 """
 
 import argparse
 import getpass
-import json
 import os
 import re
 import sys
@@ -28,15 +26,13 @@ from pathlib import Path
 
 import mechanicalsoup
 import requests
-import shogi.CSA
-import shogi.KIF
 
 # ── 設定 ──────────────────────────────────────────────────────────────
 TARGET_USER  = "dainomaru"
 SYSTEM_HOST  = "system.81dojo.com"
 LOGIN_URL    = f"https://{SYSTEM_HOST}/en/players/sign_in"
 SEARCH_URL   = f"https://{SYSTEM_HOST}/en/kifus/search/form"
-KIFU_API_URL = f"https://{SYSTEM_HOST}/api/v2/kifus/{{}}.json"
+KIFU_DL_URL  = f"https://{SYSTEM_HOST}/kifus/{{}}/download_kif.kif"
 REFERER_URL  = "https://81dojo.com"
 
 OUTPUT_DIR   = Path("kifu") / TARGET_USER
@@ -117,70 +113,21 @@ def get_game_ids(browser: mechanicalsoup.StatefulBrowser, target_user: str) -> l
     return result
 
 
-def fetch_game_json(session: requests.Session, game_id: str) -> dict | None:
-    """APIから1対局のJSONを取得する。"""
-    url = KIFU_API_URL.format(game_id)
+def fetch_kif(session: requests.Session, game_id: str) -> str | None:
+    """認証済みセッションで KIF を直接ダウンロードする。"""
+    url = KIFU_DL_URL.format(game_id)
     try:
         resp = session.get(url, timeout=30)
         resp.raise_for_status()
+        text = resp.text.strip()
+        if not text:
+            print(f"    空の応答 ({game_id})")
+            return None
         time.sleep(DELAY)
-        return resp.json()
+        return text
     except Exception as e:
         print(f"    取得失敗 ({url}): {e}")
         return None
-
-
-def csa_to_kif(csa_content: str, game_id: str) -> str | None:
-    """CSA文字列をKIF文字列に変換する。変換失敗時は None を返す。"""
-    # 'ILLEGAL_MOVE 行と直前の2手を除去（python-shogi がエラーになるため）
-    lines = []
-    for line in csa_content.splitlines():
-        if not line:
-            continue
-        if line[0] in ("I", "#"):
-            continue
-        if line.startswith("'ILLEGAL_MOVE"):
-            if len(lines) >= 2:
-                del lines[-2:]
-            continue
-        lines.append(line)
-
-    clean_csa = "\n".join(lines)
-    try:
-        games = shogi.CSA.Parser.parse_str(clean_csa)
-        if not games:
-            return None
-        return shogi.KIF.Exporter().kif(games[0])
-    except Exception as e:
-        print(f"    KIF変換失敗 (game_id={game_id}): {e}")
-        return None
-
-
-def save_game(data: dict, game_id: str, out_dir: Path, use_csa: bool) -> Path | None:
-    """1対局を KIF または CSA ファイルとして保存する。"""
-    contents: str = data.get("contents", "")
-    if not contents:
-        print("    contents フィールドが空です")
-        return None
-
-    if use_csa:
-        # CSA をそのまま保存
-        path = out_dir / f"{game_id}.csa"
-        path.write_text(contents, encoding="utf-8")
-        return path
-
-    # CSA → KIF 変換
-    kif_text = csa_to_kif(contents, game_id)
-    if kif_text is None:
-        # 変換失敗でも CSA は保持
-        path = out_dir / f"{game_id}.csa"
-        path.write_text(contents, encoding="utf-8")
-        print(f"    (KIF変換不可 → CSAで保存: {path.name})")
-        return path
-
-    path = out_dir / f"{game_id}.kif"
-    path.write_text(kif_text, encoding="utf-8")
-    return path
 
 
 def create_zip(out_dir: Path, zip_path: Path) -> int:
@@ -216,7 +163,6 @@ def main() -> None:
     )
     parser.add_argument("--user",    default=TARGET_USER, help="81dojoのターゲットユーザー名")
     parser.add_argument("--max",     type=int, default=0, help="最大取得件数 (0=全件)")
-    parser.add_argument("--csa",     action="store_true",  help="KIF変換せずCSA形式で保存")
     parser.add_argument("--no-zip",  action="store_true",  help="ZIPを作成しない")
     args = parser.parse_args()
 
@@ -226,7 +172,6 @@ def main() -> None:
     print("=" * 50)
     print(f"  81dojo 棋譜ダウンローダー")
     print(f"  対象ユーザー : {args.user}")
-    print(f"  保存形式     : {'CSA' if args.csa else 'KIF (失敗時CSA)'}")
     print(f"  保存先       : {out_dir}")
     print("=" * 50)
 
@@ -241,6 +186,8 @@ def main() -> None:
     # 対局ID収集
     print("\n[1/3] 対局IDを収集中...")
     game_ids = get_game_ids(browser, args.user)
+    # 認証クッキーをダウンロードセッションに引き継ぐ
+    auth_cookies = dict(browser.session.cookies)
     browser.close()
 
     if not game_ids:
@@ -251,15 +198,15 @@ def main() -> None:
         game_ids = game_ids[-args.max:]   # 最新N件
         print(f"最新 {args.max} 件に絞り込みました")
 
-    # 棋譜ダウンロード
+    # 棋譜ダウンロード（認証済みセッションで直接KIFを取得）
     print(f"\n[2/3] 棋譜をダウンロード中 ({len(game_ids)} 件)...")
     dl_session = requests.Session()
+    dl_session.cookies.update(auth_cookies)
     dl_session.headers.update({"Referer": REFERER_URL})
 
     ok = skip = fail = 0
     for i, gid in enumerate(game_ids, 1):
-        ext   = "csa" if args.csa else "kif"
-        fpath = out_dir / f"{gid}.{ext}"
+        fpath = out_dir / f"{gid}.kif"
 
         prefix = f"  [{i:4d}/{len(game_ids)}] {gid}"
         if fpath.exists():
@@ -267,20 +214,16 @@ def main() -> None:
             skip += 1
             continue
 
-        data = fetch_game_json(dl_session, gid)
-        if data is None:
+        kif_text = fetch_kif(dl_session, gid)
+        if kif_text is None:
             print(f"{prefix} ... 失敗")
             fail += 1
             continue
 
-        saved = save_game(data, gid, out_dir, args.csa)
-        if saved:
-            sz = saved.stat().st_size
-            print(f"{prefix} ... OK ({saved.suffix}, {sz:,} bytes)")
-            ok += 1
-        else:
-            print(f"{prefix} ... 失敗(保存エラー)")
-            fail += 1
+        fpath.write_text(kif_text, encoding="utf-8")
+        sz = fpath.stat().st_size
+        print(f"{prefix} ... OK ({sz:,} bytes)")
+        ok += 1
 
     print(f"\n  結果: 成功={ok}  スキップ={skip}  失敗={fail}")
 
