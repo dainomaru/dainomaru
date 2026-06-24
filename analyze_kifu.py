@@ -152,7 +152,10 @@ def main():
 
     kif_text = kif_path.read_text(encoding="utf-8", errors="replace")
     game = parse_kif(kif_text)
-    moves = game.get("moves", [])
+    # python-shogi は投了等の特殊手を 0x8000以上の整数または文字列で返すことがある
+    # 通常手 (0 < m < 0x8000) のみを対象とする
+    raw_moves = game.get("moves", [])
+    moves = [m for m in raw_moves if isinstance(m, int) and 0 < m < 0x8000]
     names = game.get("names", [])
 
     if not moves:
