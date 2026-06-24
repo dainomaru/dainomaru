@@ -41,8 +41,11 @@ class ShogiEngine:
         print("エンジン初期化完了", flush=True)
 
     def _send(self, cmd: str):
-        self.proc.stdin.write(cmd + "\n")
-        self.proc.stdin.flush()
+        try:
+            self.proc.stdin.write(cmd + "\n")
+            self.proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            pass
 
     def _wait(self, keyword: str) -> str:
         while True:
@@ -54,6 +57,8 @@ class ShogiEngine:
 
     def eval(self, sfen: str) -> int | None:
         """局面を解析して手番側視点の評価値を返す"""
+        if self.proc.poll() is not None:
+            return None
         self._send(f"position fen {sfen}")
         self._send(f"go movetime {self.movetime}")
         score = None
@@ -239,7 +244,11 @@ def main():
         except Exception:
             kif_label = f"手{i+1}"
 
-        score = to_black(engine.eval(board.sfen()), turn)
+        try:
+            score = to_black(engine.eval(board.sfen()), turn)
+        except Exception as e:
+            print(f"  Warning: 手{i+1}評価失敗 ({e}), 解析を途中で終了", flush=True)
+            break
         move_records.append((i + 1, turn, kif_label))
         evals.append(score)
 
@@ -254,7 +263,10 @@ def main():
             print(f"  {i+1}/{len(moves)}手 ({pct}%)", flush=True)
 
     # 最終局面
-    final_score = to_black(engine.eval(board.sfen()), board.turn)
+    try:
+        final_score = to_black(engine.eval(board.sfen()), board.turn)
+    except Exception:
+        final_score = None
     evals.append(final_score)
     engine.close()
 
