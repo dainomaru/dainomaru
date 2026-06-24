@@ -67,6 +67,7 @@ class ShogiEngine:
         self._send(f"position fen {sfen}")
         self._send(f"go movetime {self.movetime}")
         candidates: dict[int, dict] = {}
+        _dbg = getattr(self, '_dbg_done', False)
         while True:
             raw = self.proc.stdout.readline()
             if not raw:
@@ -75,6 +76,11 @@ class ShogiEngine:
             if not line:
                 continue
             p = line.split()
+            if not _dbg and line.startswith("info"):
+                print(f"UCI_RAW: {line[:300]}", flush=True)
+                if "bestmove" in line or line.startswith("bestmove"):
+                    self._dbg_done = True
+                    _dbg = True
             if line.startswith("info") and "score" in line and "depth" in line:
                 try:
                     mid = int(p[p.index("multipv") + 1]) if "multipv" in p else 1
