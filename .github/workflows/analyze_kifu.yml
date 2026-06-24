@@ -71,9 +71,9 @@ jobs:
           TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' \
             --repo "${{ github.repository }}")
           echo "最新リリースタグ: $TAG"
-          gh release upload "$TAG" analysis_report.txt analyzed_game.kif \
+          gh release upload "$TAG" analysis_report.txt analyzed_game.kif evaluation_graph.html \
             --clobber \
             --repo "${{ github.repository }}"
-          echo "analysis_report.txt / analyzed_game.kif をリリース ${TAG} にアップロードしました"
+          echo "analysis_report.txt / analyzed_game.kif / evaluation_graph.html をリリース ${TAG} にアップロードしました"
         env:
           GH_TOKEN: ${{ github.token }}

@@ -156,6 +156,125 @@ def pv_to_kif(pv_usi: list[str], board: shogi.Board, max_moves: int = 8) -> str:
     return " ".join(parts)
 
 
+def generate_eval_graph_html(
+    move_records: list,
+    evals: list,
+    losses: list,
+    black_name: str,
+    white_name: str,
+    kif_name: str,
+    date_str: str,
+) -> str:
+    """SVG ベースの評価値グラフ HTML (外部依存なし・自己完結) を生成する"""
+    W, H = 960, 440
+    PL, PR, PT, PB = 68, 24, 44, 58
+    CW = W - PL - PR
+    CH = H - PT - PB
+    MAX_EVAL = 2000
+
+    pts: list[tuple[int, int]] = []
+    for rec, sc in zip(move_records, evals):
+        if sc is not None:
+            pts.append((rec[0], max(-MAX_EVAL, min(MAX_EVAL, sc))))
+    if not pts:
+        return ""
+
+    total = max(r[0] for r in move_records)
+
+    def xp(n: int) -> str:
+        return f"{PL + (n - 1) / max(total - 1, 1) * CW:.1f}"
+
+    def yp(s: int) -> str:
+        return f"{PT + (1 - (s + MAX_EVAL) / (2 * MAX_EVAL)) * CH:.1f}"
+
+    cy = PT + CH / 2  # y of evaluation 0
+    elems: list[str] = []
+
+    # Background: upper = black winning, lower = white winning
+    elems.append(f'<rect x="{PL}" y="{PT}" width="{CW}" height="{cy - PT:.1f}" fill="#0d2240"/>')
+    elems.append(f'<rect x="{PL}" y="{cy:.1f}" width="{CW}" height="{PT + CH - cy:.1f}" fill="#240d0d"/>')
+
+    # Horizontal grid lines + Y labels
+    for sc in range(-2000, 2001, 500):
+        y = yp(sc)
+        col, sw = ("#888", "2") if sc == 0 else ("#333", "1")
+        elems.append(f'<line x1="{PL}" y1="{y}" x2="{PL + CW}" y2="{y}" stroke="{col}" stroke-width="{sw}"/>')
+        sign = "+" if sc > 0 else ""
+        elems.append(f'<text x="{PL - 5}" y="{float(y) + 4:.1f}" text-anchor="end" fill="#888" font-size="11">{sign}{sc}</text>')
+
+    # Filled area between line and zero
+    first_x, last_x = xp(pts[0][0]), xp(pts[-1][0])
+    poly_pts = f"{first_x},{cy:.1f} " + " ".join(f"{xp(n)},{yp(s)}" for n, s in pts) + f" {last_x},{cy:.1f}"
+    elems.append(f'<polygon points="{poly_pts}" fill="#2a5090" opacity="0.3"/>')
+
+    # Main evaluation line (colored by value)
+    path = "M " + " L ".join(f"{xp(n)} {yp(s)}" for n, s in pts)
+    elems.append(f'<path d="{path}" fill="none" stroke="#64b5f6" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>')
+
+    # Blunder / mistake markers (with tooltip via <title>)
+    for rec, sc, lo in zip(move_records, evals, losses):
+        if sc is None or lo is None:
+            continue
+        num, turn, label = rec
+        player = "▲" if turn == shogi.BLACK else "△"
+        x, y = xp(num), yp(max(-MAX_EVAL, min(MAX_EVAL, sc)))
+        tip = f"{num}手 {player}{label} 損失{lo:+d}"
+        if lo >= BLUNDER_THRESHOLD:
+            elems.append(f'<circle cx="{x}" cy="{y}" r="6" fill="#e05050" stroke="#ff8080" stroke-width="1.5" opacity="0.9"><title>{tip} (悪手)</title></circle>')
+        elif lo >= MISTAKE_THRESHOLD:
+            elems.append(f'<circle cx="{x}" cy="{y}" r="4" fill="#e07820" stroke="#ffaa40" stroke-width="1" opacity="0.85"><title>{tip} (疑問手)</title></circle>')
+
+    # X axis labels
+    step = max(1, total // 15)
+    for rec in move_records:
+        num = rec[0]
+        if num == 1 or num % step == 0 or num == total:
+            elems.append(f'<text x="{xp(num)}" y="{H - 10}" text-anchor="middle" fill="#777" font-size="11">{num}</text>')
+
+    # Chart border
+    elems.append(f'<rect x="{PL}" y="{PT}" width="{CW}" height="{CH}" fill="none" stroke="#444" stroke-width="1"/>')
+
+    # Corner labels
+    elems.append(f'<text x="{PL + 6}" y="{PT + 15}" fill="#4a7fbf" font-size="11">▲{black_name}有利</text>')
+    elems.append(f'<text x="{PL + 6}" y="{PT + CH - 6}" fill="#bf4a4a" font-size="11">△{white_name}有利</text>')
+
+    svg_body = "\n  ".join(elems)
+    esc_kif = kif_name.replace("&", "&amp;").replace("<", "&lt;")
+    esc_bl = black_name.replace("&", "&amp;")
+    esc_wh = white_name.replace("&", "&amp;")
+
+    return f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>形勢グラフ — {esc_kif}</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,sans-serif;padding:16px}}
+h2{{color:#79b8ff;font-size:1.1em;margin-bottom:4px}}
+.meta{{color:#8b949e;font-size:.82em;margin-bottom:14px}}
+svg{{max-width:100%;height:auto;border-radius:6px;background:#161b22}}
+.legend{{margin-top:12px;display:flex;flex-wrap:wrap;gap:14px;font-size:.82em;color:#8b949e}}
+.dot{{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:4px;vertical-align:middle}}
+</style>
+</head>
+<body>
+<h2>形勢グラフ</h2>
+<div class="meta">先手: {esc_bl} &nbsp;|&nbsp; 後手: {esc_wh} &nbsp;|&nbsp; {date_str} &nbsp;|&nbsp; {esc_kif}</div>
+<svg viewBox="0 0 {W} {H}" width="{W}" height="{H}">
+  {svg_body}
+</svg>
+<div class="legend">
+  <span><span class="dot" style="background:#64b5f6"></span>評価値推移（先手有利↑ 後手有利↓）</span>
+  <span><span class="dot" style="background:#e05050"></span>悪手（損失{BLUNDER_THRESHOLD}以上）※マウスオーバーで詳細</span>
+  <span><span class="dot" style="background:#e07820"></span>疑問手（損失{MISTAKE_THRESHOLD}以上）</span>
+</div>
+</body>
+</html>
+"""
+
+
 def eval_bar(score: int, width: int = 30) -> str:
     """評価値を ASCII 棒グラフで表示 (中央=0, 右=先手有利)"""
     capped = max(-1000, min(1000, score))
@@ -263,8 +382,9 @@ def main():
     parser.add_argument("--engine",      required=True, help="Fairy-Stockfish のパス")
     parser.add_argument("--kif",         help="解析する KIF ファイル")
     parser.add_argument("--kif-dir",     help="KIF ディレクトリ (最新を自動選択)")
-    parser.add_argument("--output",      default="analysis_report.txt")
+    parser.add_argument("--output",       default="analysis_report.txt")
     parser.add_argument("--output-kif",  default="analyzed_game.kif")
+    parser.add_argument("--output-graph", default="evaluation_graph.html")
     parser.add_argument("--movetime",    type=int, default=300, help="1手あたり解析時間 (ms)")
     parser.add_argument("--multipv",     type=int, default=10,  help="MultiPV 候補数")
     args = parser.parse_args()
@@ -447,8 +567,16 @@ def main():
     annotated = annotate_kif(kif_text, move_records, boards_before, analysis_results)
     Path(args.output_kif).write_text(annotated, encoding="utf-8-sig")
 
+    graph_html = generate_eval_graph_html(
+        move_records, evals[:-1], losses,
+        black_name, white_name, kif_path.name, date_str,
+    )
+    if graph_html:
+        Path(args.output_graph).write_text(graph_html, encoding="utf-8")
+
     print(f"\n解析完了 → {args.output}")
     print(f"解析棋譜  → {args.output_kif} ({kif_path.name}, ShogiDroid形式コメント付き)")
+    print(f"評価グラフ → {args.output_graph} (ブラウザで開いてください)")
     print(f"悪手:{len(blunders)}件  疑問手:{len(mistakes)}件")
 
     print()

@@ -8,7 +8,7 @@ Fairy-Stockfish エンジンで最新棋譜を解析し、評価値コメント�
    - method: `run_workflow`
    - workflow_id: `analyze_kifu.yml`
    - ref: `claude/shogi-81dojo-analysis-019qha`
-   - inputs: `{"movetime": "300"}`
+   - inputs: `{}`
    - owner: `dainomaru`, repo: `dainomaru`
 
 2. 5〜10秒待ってから `mcp__github__actions_list` で最新 run_id を取得:
@@ -17,7 +17,7 @@ Fairy-Stockfish エンジンで最新棋譜を解析し、評価値コメント�
 
 3. `mcp__github__actions_list` で進行状況を監視（list_workflow_jobs で run_id を指定）:
    - 解析ステップは約 40〜60 秒かかる（129手 × 300ms）
-   - 60 秒ごとに ScheduleWakeup で自動確認
+   - ScheduleWakeup(270s) で自動確認
 
 4. 完了後、`mcp__github__get_latest_release` でリリースアセットを確認:
    - `analyzed_game.kif` — 解析対象の棋譜1局（各手に評価値コメント付き）
@@ -32,19 +32,27 @@ Fairy-Stockfish エンジンで最新棋譜を解析し、評価値コメント�
 
 | ファイル | 内容 | エンコード |
 |---------|------|-----------|
-| `analyzed_game.kif` | 解析棋譜1局 + 各手に `*評価値:` コメント行 | UTF-8 with BOM |
+| `analyzed_game.kif` | 解析棋譜1局 + 各手に `*評価値:N` / `*解析 0` コメント | UTF-8 with BOM |
 | `analysis_report.txt` | 悪手・疑問手一覧 + 評価値グラフ | UTF-8 with BOM |
 | `dainomaru_kifu.zip` | 全棋譜 ZIP（ダウンロードのみ） | — |
 
-KIF コメント形式（ShogiDroid 等で手を進めると表示）:
+KIF コメント形式（ShogiDroid で開くと評価値・読み筋・グラフが表示）:
 ```
-   1 ７六歩(77)   ( 0:01/...)
-*評価値: +50→+30  損失:-20
-   2 ３四歩(34)
-*評価値: +30→-120  損失:-150  ▲疑問手
-  81 ４四角打
-*評価値: +200→-300  損失:-500  ★悪手★
+1    ７六歩(77)        (0:04/0:00:04)
+*評価値:30
+*Engines 0 Fairy-Stockfish-largeboard
+*解析 0  時間 00:00.3 深さ 11/15 ノード数 131458 評価値 30 読み筋 ▲７六歩(77) △４二金(41) ▲４八飛(28) ...
+*解析 0  候補2 深さ 11 評価値 23 読み筋 ▲１六歩(17) ...
+...
+*解析 0  候補10 深さ 10 評価値 -23 読み筋 ▲７八銀(79) ...
+2    ８四歩(83)        (0:02/0:00:02)
+*評価値:7
+*Engines 0 Fairy-Stockfish-largeboard
+*解析 0  時間 00:00.3 深さ 11/12 ノード数 132106 評価値 7 読み筋 △４二金(41) ...
 ```
+
+- `*評価値:N` — 先手視点の評価値（正=先手有利）。ShogiDroid の形勢グラフに使用。
+- `*Engines 0 <name>` + `*解析 0 ...` — ShogiDroid の解析パネル用（時間・深さ・読み筋 10候補）。
 
 ## よくある問題と対処
 
@@ -55,11 +63,15 @@ KIF コメント形式（ShogiDroid 等で手を進めると表示）:
 | 解析ステップが無限ハング | readline() の EOF 未検出 | 修正済み（raw が空なら break） |
 | 文字化け | UTF-8 未認識 | 修正済み（utf-8-sig で保存） |
 | `有効な棋譜が見つかりません` | 最新10件に有効な手がない | kifu_files/ の内容を確認 |
+| 形勢グラフが表示されない | `*評価値:N` コメントが必要 | 修正済み（各手の直後に `*評価値:N` を挿入） |
 
 ## 解析スクリプトの仕様（analyze_kifu.py）
 
-- エンジン: Fairy-Stockfish largeboard（UCI プロトコル、`UCI_Variant shogi`）
-- 悪手閾値: 損失 300 以上（`★悪手★`）
-- 疑問手閾値: 損失 100〜299（`▲疑問手`）
+- エンジン: Fairy-Stockfish largeboard（USI プロトコル）
+- 悪手閾値: 損失 300 以上
+- 疑問手閾値: 損失 100〜299
+- MultiPV: 10候補（`*解析 0` + `*解析 0  候補2〜10`）
 - KIF 候補: 最新日付順に最大10件試し、有効な手がある最初のファイルを解析
 - 評価値: 常に先手（Black）視点に正規化
+- PV変換: `shogi.KIF.Exporter.kif_move_from(usi, board)` で USI→KIF 表記に変換
+- bestmove フォールバック: Fairy-Stockfish が `pv` を出力しない場合は `bestmove` 行を使用
