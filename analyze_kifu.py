@@ -132,23 +132,26 @@ def parse_kif(kif_text: str) -> dict:
 
 
 def extract_moves(raw_moves: list) -> list:
-    """raw_moves から有効な手のみを抽出する。
-    python-shogi のバージョンやKIFフォーマットによって
-    手の型が異なるため、複数の戦略を試みる。
+    """raw_moves から有効な手(Move整数)のリストに変換する。
+    python-shogi の KIF パーサは手を USI 形式文字列 ('7g7f' 等) で返す。
+    shogi.Move.from_usi() で整数に変換し、resign 等の非手文字列は除外する。
     """
-    # 戦略1: to_square 属性を持つオブジェクト (Move object)
-    moves = [m for m in raw_moves if hasattr(m, 'to_square')]
-    if moves:
-        return moves
-
-    # 戦略2: 整数 (integer encoding)
-    moves = [m for m in raw_moves if isinstance(m, int)]
-    if moves:
-        return moves
-
-    # 戦略3: 文字列以外 (None や特殊オブジェクト除外)
-    moves = [m for m in raw_moves if not isinstance(m, str) and m is not None]
-    return moves
+    valid = []
+    for m in raw_moves:
+        if isinstance(m, str):
+            # USI形式文字列をMove整数に変換 ('7g7f', 'P*5e' 等)
+            # 'resign', 'win' 等は from_usi で例外またはNullになりスキップ
+            try:
+                move_int = shogi.Move.from_usi(m)
+                if move_int:
+                    valid.append(move_int)
+            except Exception:
+                pass
+        elif isinstance(m, int) and m > 0:
+            valid.append(m)
+        elif hasattr(m, 'to_square'):
+            valid.append(m)
+    return valid
 
 
 def main():
