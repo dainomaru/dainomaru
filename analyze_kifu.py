@@ -23,6 +23,22 @@ MISTAKE_THRESHOLD = 100
 ENGINE_NAME = "Fairy-Stockfish-largeboard"
 
 
+def normalize_move_usi(move: str) -> str:
+    """Fairy-Stockfishが数値形式('7776')で出力する場合にUSI形式('7g7f')に変換する。
+    すでにUSI形式の場合はそのまま返す。"""
+    # 4桁数値: 7776 → 7g7f  (ランク: 1→a, 2→b, ..., 9→i)
+    m = re.match(r'^([1-9])([1-9])([1-9])([1-9])(\+?)$', move)
+    if m:
+        ff, rf, ft, rt, promo = m.groups()
+        return f"{ff}{chr(ord('a') + int(rf) - 1)}{ft}{chr(ord('a') + int(rt) - 1)}{promo}"
+    # 数値打ち駒: P*36 → P*3f
+    m = re.match(r'^([PLNSGBRplnsgbr])\*([1-9])([1-9])$', move)
+    if m:
+        piece, ft, rt = m.groups()
+        return f"{piece.upper()}*{ft}{chr(ord('a') + int(rt) - 1)}"
+    return move
+
+
 class ShogiEngine:
     """Fairy-Stockfish との USI 通信（将棋ネイティブプロトコル）"""
 
@@ -99,10 +115,10 @@ class ShogiEngine:
                     pass
             if line.startswith("bestmove"):
                 parts_bm = line.split()
-                if len(parts_bm) >= 2 and parts_bm[1] not in ("(none)", "0000"):
-                    bm = parts_bm[1]
-                    # Fairy-Stockfish shogi USI does not output pv field;
-                    # use bestmove as fallback for the top candidate
+                if len(parts_bm) >= 2 and parts_bm[1] not in ("(none)", "0000", "resign", "win"):
+                    raw_bm = parts_bm[1]
+                    bm = normalize_move_usi(raw_bm)
+                    print(f"DBG_BM raw={raw_bm!r} norm={bm!r}", flush=True)
                     if 1 in candidates and not candidates[1]["pv"]:
                         candidates[1]["pv"] = [bm]
                 break
@@ -124,18 +140,21 @@ def to_black(score: int | None, turn: int) -> int | None:
 
 
 def pv_to_kif(pv_usi: list[str], board: shogi.Board, max_moves: int = 8) -> str:
-    """UCI/USI 形式の読み筋を KIF 表記文字列に変換する"""
+    """USI 形式の読み筋を KIF 表記文字列に変換する"""
     parts = []
     b = copy.deepcopy(board)
-    for usi in pv_usi[:max_moves]:
+    for raw_usi in pv_usi[:max_moves]:
+        usi = normalize_move_usi(raw_usi)
         try:
             m = shogi.Move.from_usi(usi)
             if not m:
+                print(f"DBG_PV from_usi({usi!r}) returned falsy", flush=True)
                 break
             prefix = "▲" if b.turn == shogi.BLACK else "△"
             parts.append(f"{prefix}{shogi.KIF.move_to_kif(m, b)}")
             b.push(m)
-        except Exception:
+        except Exception as e:
+            print(f"DBG_PV exception usi={usi!r}: {e}", flush=True)
             break
     return " ".join(parts)
 
