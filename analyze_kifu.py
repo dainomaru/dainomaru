@@ -120,7 +120,7 @@ def eval_bar(score: int, width: int = 30) -> str:
 def annotate_kif(kif_text: str, move_records: list, evals: list,
                  losses: list, blunder_thr: int, mistake_thr: int) -> str:
     """KIFテキストの各指し手行の後に評価値コメントを挿入する"""
-    move_re = re.compile(r'^\s+(\d+)\s+\S')
+    move_re = re.compile(r'^\s*(\d+)\s+\S')
     eval_map = {}
     for i, (num, turn, _) in enumerate(move_records):
         sc_before = evals[i] if i < len(evals) else None
