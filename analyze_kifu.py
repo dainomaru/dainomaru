@@ -342,7 +342,7 @@ def main():
         )
 
     report = "\n".join(lines)
-    Path(args.output).write_text(report, encoding="utf-8")
+    Path(args.output).write_text(report, encoding="utf-8-sig")
 
     print(f"\n解析完了 → {args.output}")
     print(f"悪手:{len(blunders)}件  疑問手:{len(mistakes)}件")
