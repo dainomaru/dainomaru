@@ -108,7 +108,9 @@ class ShogiEngine:
                         score = 30000 if n > 0 else -30000
                     else:
                         continue
-                    pv = p[p.index("pv") + 1:] if "pv" in p else []
+                    pv_new = p[p.index("pv") + 1:] if "pv" in p else []
+                    # 以前の pv を保持（score mate ラインに pv がない場合の上書き防止）
+                    pv = pv_new if pv_new else candidates.get(mid, {}).get("pv", [])
                     candidates[mid] = {
                         "depth": depth, "seldepth": seldepth,
                         "nodes": nodes, "time_ms": time_ms,
@@ -148,7 +150,9 @@ class ShogiEngine:
                     if p[si + 1] == "mate":
                         n = int(p[si + 2])
                         score = 30000 if n > 0 else -30000
-                        pv = p[p.index("pv") + 1:] if "pv" in p else []
+                        pv_new = p[p.index("pv") + 1:] if "pv" in p else []
+                        # 以前の pv を保持（go mate ラインに pv がない場合の上書き防止）
+                        pv = pv_new if pv_new else (best.get("pv", []) if best else [])
                         nodes = int(p[p.index("nodes") + 1]) if "nodes" in p else 0
                         time_ms = int(p[p.index("time") + 1]) if "time" in p else 0
                         best = {
