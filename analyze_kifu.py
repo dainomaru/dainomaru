@@ -21,6 +21,8 @@ from pathlib import Path
 BLUNDER_THRESHOLD = 300
 MISTAKE_THRESHOLD = 100
 ENGINE_NAME = "Fairy-Stockfish-largeboard"
+MATE_SEARCH_THRESHOLD = 1500  # この評価値(cp)を超えたら詰み専用探索を追加実行
+MATE_SEARCH_PLIES = 31        # go mate N: 最大31手詰みまで探索
 
 
 def normalize_move_usi(move: str) -> str:
@@ -121,6 +123,42 @@ class ShogiEngine:
                         candidates[1]["pv"] = [bm]
                 break
         return [candidates[k] for k in sorted(candidates.keys())]
+
+    def eval_mate_search(self, sfen: str, max_plies: int = 31) -> dict | None:
+        """詰み専用探索（go mate N）。詰みが見つかれば候補手情報を返す。
+        通常の go movetime では見逃す長手数の詰みを確定するために使用する。"""
+        if self.proc.poll() is not None:
+            return None
+        self._send(f"position sfen {sfen}")
+        self._send(f"go mate {max_plies}")
+        best: dict | None = None
+        while True:
+            raw = self.proc.stdout.readline()
+            if not raw:
+                break
+            line = raw.strip()
+            if not line:
+                continue
+            p = line.split()
+            if line.startswith("info") and "score" in p:
+                try:
+                    si = p.index("score")
+                    if p[si + 1] == "mate":
+                        n = int(p[si + 2])
+                        score = 30000 if n > 0 else -30000
+                        pv = p[p.index("pv") + 1:] if "pv" in p else []
+                        nodes = int(p[p.index("nodes") + 1]) if "nodes" in p else 0
+                        time_ms = int(p[p.index("time") + 1]) if "time" in p else 0
+                        best = {
+                            "depth": abs(n), "seldepth": abs(n),
+                            "nodes": nodes, "time_ms": time_ms,
+                            "score": score, "pv": pv, "mate_in": n,
+                        }
+                except (ValueError, IndexError):
+                    pass
+            if line.startswith("bestmove"):
+                break
+        return best
 
     def close(self):
         try:
@@ -332,16 +370,27 @@ def annotate_kif(kif_text: str, move_records: list,
                     ts = c0["time_ms"] / 1000
                     time_str = f"{int(ts // 60):02d}:{ts % 60:04.1f}"
                     score0 = c0["score"] if turn == shogi.BLACK else -c0["score"]
+                    mate_in = c0.get("mate_in")
                     pv0 = pv_to_kif(c0["pv"], board)
 
                     if not engine_declared:
                         result.append(f"**Engines 0 {ENGINE_NAME}")
                         engine_declared = True
 
-                    result.append(
-                        f"**解析 0  時間 {time_str} 深さ {c0['depth']}/{c0['seldepth']} "
-                        f"ノード数 {c0['nodes']} 評価値 {score0} 読み筋 {pv0} "
-                    )
+                    # 詰みが確定している場合は評価値を±30000で表示し別行にも明記
+                    if mate_in is not None:
+                        score_val = 30000 if score0 > 0 else -30000
+                        result.append(
+                            f"**解析 0  時間 {time_str} 深さ {c0['depth']}/{c0['seldepth']} "
+                            f"ノード数 {c0['nodes']} 評価値 {score_val} 読み筋 {pv0} "
+                        )
+                        mated = "後手" if score0 > 0 else "先手"
+                        result.append(f"*{mated}玉詰み{abs(mate_in)}手")
+                    else:
+                        result.append(
+                            f"**解析 0  時間 {time_str} 深さ {c0['depth']}/{c0['seldepth']} "
+                            f"ノード数 {c0['nodes']} 評価値 {score0} 読み筋 {pv0} "
+                        )
 
                     for i, cand in enumerate(candidates[1:], start=2):
                         score = cand["score"] if turn == shogi.BLACK else -cand["score"]
@@ -402,7 +451,7 @@ def main():
     parser.add_argument("--output",       default="analysis_report.txt")
     parser.add_argument("--output-kif",  default="analyzed_game.kif")
     parser.add_argument("--output-graph", default="evaluation_graph.html")
-    parser.add_argument("--movetime",    type=int, default=300, help="1手あたり解析時間 (ms)")
+    parser.add_argument("--movetime",    type=int, default=1000, help="1手あたり解析時間 (ms)")
     parser.add_argument("--multipv",     type=int, default=10,  help="MultiPV 候補数")
     args = parser.parse_args()
 
@@ -485,6 +534,16 @@ def main():
         except Exception as e:
             print(f"  Warning: 手{i+1}評価失敗 ({e}), 解析を途中で終了", flush=True)
             break
+
+        # 詰み専用探索: 通常解析で高評価だが確定詰みでない場合に追加実行
+        if results and MATE_SEARCH_THRESHOLD <= abs(results[0]["score"]) < 30000:
+            try:
+                mate = engine.eval_mate_search(board.sfen(), MATE_SEARCH_PLIES)
+                if mate is not None and mate["score"] == 30000:
+                    results[0] = mate
+                    print(f"  詰み確認: 手{i+1} 詰み{mate['mate_in']}手", flush=True)
+            except Exception:
+                pass
 
         score = to_black(results[0]["score"], turn) if results else None
         move_records.append((i + 1, turn, kif_label))

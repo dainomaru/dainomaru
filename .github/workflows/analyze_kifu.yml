@@ -6,7 +6,7 @@ on:
       movetime:
         description: '1手あたり解析時間 (ms、短いほど速い・精度低)'
         required: false
-        default: '300'
+        default: '1000'
 
 jobs:
   analyze:
