@@ -159,6 +159,13 @@ class ShogiEngine:
                 except (ValueError, IndexError):
                     pass
             if line.startswith("bestmove"):
+                # go mate の info に pv が含まれない場合、bestmove を pv[0] に使用
+                if best is not None and not best["pv"]:
+                    parts_bm = line.split()
+                    if len(parts_bm) >= 2:
+                        bm = normalize_move_usi(parts_bm[1])
+                        if bm not in ("(none)", "0000", "resign", "win"):
+                            best["pv"] = [bm]
                 break
         return best
 
@@ -546,9 +553,13 @@ def main():
 
         # 詰み専用探索: 通常解析で高評価だが確定詰みでない場合に追加実行
         if results and MATE_SEARCH_THRESHOLD <= abs(results[0]["score"]) < 30000:
+            orig_pv = results[0].get("pv", [])
             try:
                 mate = engine.eval_mate_search(board.sfen(), MATE_SEARCH_PLIES)
                 if mate is not None and mate["score"] == 30000:
+                    # go mate の pv が空の場合は eval_full の pv をフォールバックに使用
+                    if not mate.get("pv") and orig_pv:
+                        mate["pv"] = orig_pv
                     results[0] = mate
                     print(f"  詰み確認: 手{i+1} 詰み{mate['mate_in']}手", flush=True)
             except Exception:
