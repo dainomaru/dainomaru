@@ -211,18 +211,32 @@ def generate_eval_graph_html(
     path = "M " + " L ".join(f"{xp(n)} {yp(s)}" for n, s in pts)
     elems.append(f'<path d="{path}" fill="none" stroke="#64b5f6" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>')
 
-    # Blunder / mistake markers (with tooltip via <title>)
-    for rec, sc, lo in zip(move_records, evals, losses):
-        if sc is None or lo is None:
+    # Blunder / mistake markers
+    # evals[i] = eval before move i+1; evals[i+1] = eval after move i+1
+    full_evals = evals  # evals[:-1] passed in — length == len(move_records)
+    for i, (rec, lo) in enumerate(zip(move_records, losses)):
+        if lo is None:
             continue
         num, turn, label = rec
+        # Place marker at eval AFTER the move (result of the blunder/mistake)
+        # = evals[i+1] in the main evals list = full_evals[i] next element
+        sc_after = full_evals[i + 1] if i + 1 < len(full_evals) else full_evals[i]
+        if sc_after is None:
+            continue
+        x = xp(num)
+        y = yp(max(-MAX_EVAL, min(MAX_EVAL, sc_after)))
         player = "▲" if turn == shogi.BLACK else "△"
-        x, y = xp(num), yp(max(-MAX_EVAL, min(MAX_EVAL, sc)))
-        tip = f"{num}手 {player}{label} 損失{lo:+d}"
         if lo >= BLUNDER_THRESHOLD:
-            elems.append(f'<circle cx="{x}" cy="{y}" r="6" fill="#e05050" stroke="#ff8080" stroke-width="1.5" opacity="0.9"><title>{tip} (悪手)</title></circle>')
+            # Vertical dashed guide line at this move
+            elems.append(f'<line x1="{x}" y1="{PT}" x2="{x}" y2="{PT + CH}" stroke="#e05050" stroke-width="1" stroke-dasharray="4,3" opacity="0.5"/>')
+            # Large red circle
+            elems.append(f'<circle cx="{x}" cy="{y}" r="10" fill="#e05050" stroke="#ff6060" stroke-width="2.5" opacity="1"/>')
+            # Move number label
+            label_y = f"{float(y) - 13:.1f}" if float(y) > PT + 18 else f"{float(y) + 22:.1f}"
+            elems.append(f'<text x="{x}" y="{label_y}" text-anchor="middle" fill="#ffaaaa" font-size="11" font-weight="bold">{num}</text>')
         elif lo >= MISTAKE_THRESHOLD:
-            elems.append(f'<circle cx="{x}" cy="{y}" r="4" fill="#e07820" stroke="#ffaa40" stroke-width="1" opacity="0.85"><title>{tip} (疑問手)</title></circle>')
+            # Orange circle
+            elems.append(f'<circle cx="{x}" cy="{y}" r="7" fill="#e07820" stroke="#ffaa40" stroke-width="2" opacity="1"/>')
 
     # X axis labels
     step = max(1, total // 15)
@@ -294,8 +308,9 @@ def eval_bar(score: int, width: int = 30) -> str:
 def annotate_kif(kif_text: str, move_records: list,
                  boards_before: list[shogi.Board],
                  analysis_results: list[list[dict]]) -> str:
-    """KIF テキストの各指し手行の後に ShogiDroid 形式の **解析 コメントを挿入する。
-    lishogi 形式に合わせ: **Engines は最初の手のみ宣言、以降は **解析 のみ。
+    """KIF テキストの各指し手行の前に ShogiDroid 形式の **解析 コメントを挿入する。
+    lishogi 形式: 解析ブロックは指し手の前に置く（ShogiDroid の悪手検出に必要）。
+    **Engines は最初の解析ブロックの前のみ宣言。
     """
     move_re = re.compile(r'^\s*(\d+)\s+\S')
 
@@ -307,39 +322,35 @@ def annotate_kif(kif_text: str, move_records: list,
     engine_declared = False
 
     for line in kif_text.split("\n"):
-        result.append(line)
         m = move_re.match(line)
-        if not m:
-            continue
-        num = int(m.group(1))
-        if num not in analysis_map:
-            continue
-        turn, board, candidates = analysis_map[num]
-        if not candidates:
-            continue
+        if m:
+            num = int(m.group(1))
+            if num in analysis_map:
+                turn, board, candidates = analysis_map[num]
+                if candidates:
+                    c0 = candidates[0]
+                    ts = c0["time_ms"] / 1000
+                    time_str = f"{int(ts // 60):02d}:{ts % 60:04.1f}"
+                    score0 = c0["score"] if turn == shogi.BLACK else -c0["score"]
+                    pv0 = pv_to_kif(c0["pv"], board)
 
-        c0 = candidates[0]
-        ts = c0["time_ms"] / 1000
-        time_str = f"{int(ts // 60):02d}:{ts % 60:04.1f}"
-        score0 = c0["score"] if turn == shogi.BLACK else -c0["score"]
-        pv0 = pv_to_kif(c0["pv"], board)
+                    if not engine_declared:
+                        result.append(f"**Engines 0 {ENGINE_NAME}")
+                        engine_declared = True
 
-        # **Engines 0 は最初の手のみ（lishogi形式）
-        if not engine_declared:
-            result.append(f"**Engines 0 {ENGINE_NAME}")
-            engine_declared = True
+                    result.append(
+                        f"**解析 0  時間 {time_str} 深さ {c0['depth']}/{c0['seldepth']} "
+                        f"ノード数 {c0['nodes']} 評価値 {score0} 読み筋 {pv0} "
+                    )
 
-        result.append(
-            f"**解析 0  時間 {time_str} 深さ {c0['depth']}/{c0['seldepth']} "
-            f"ノード数 {c0['nodes']} 評価値 {score0} 読み筋 {pv0} "
-        )
+                    for i, cand in enumerate(candidates[1:], start=2):
+                        score = cand["score"] if turn == shogi.BLACK else -cand["score"]
+                        pv = pv_to_kif(cand["pv"], board)
+                        result.append(
+                            f"**解析 0  候補{i} 深さ {cand['depth']} 評価値 {score} 読み筋 {pv} "
+                        )
 
-        for i, cand in enumerate(candidates[1:], start=2):
-            score = cand["score"] if turn == shogi.BLACK else -cand["score"]
-            pv = pv_to_kif(cand["pv"], board)
-            result.append(
-                f"**解析 0  候補{i} 深さ {cand['depth']} 評価値 {score} 読み筋 {pv} "
-            )
+        result.append(line)  # 指し手行は解析ブロックの後
 
     return "\n".join(result)
 
