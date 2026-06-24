@@ -153,13 +153,18 @@ def main():
     kif_text = kif_path.read_text(encoding="utf-8", errors="replace")
     game = parse_kif(kif_text)
     moves = game.get("moves", [])
-    names = game.get("names", {})
+    names = game.get("names", [])
 
     if not moves:
         sys.exit("棋譜に手が含まれていません")
 
-    black_name = names.get(shogi.BLACK, "先手")
-    white_name = names.get(shogi.WHITE, "後手")
+    # python-shogi は names をリスト [black_name, white_name] で返す
+    if isinstance(names, list):
+        black_name = names[shogi.BLACK] if len(names) > shogi.BLACK else "先手"
+        white_name = names[shogi.WHITE] if len(names) > shogi.WHITE else "後手"
+    else:
+        black_name = names.get(shogi.BLACK, "先手")
+        white_name = names.get(shogi.WHITE, "後手")
 
     date_str = "不明"
     for line in kif_text.split("\n")[:20]:
