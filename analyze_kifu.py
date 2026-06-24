@@ -108,27 +108,47 @@ def eval_bar(score: int, width: int = 30) -> str:
     return "".join(bar)
 
 
-def find_latest_kif(kif_dir: Path) -> Path | None:
-    """日付が最新の KIF ファイルを返す"""
-    best, best_date = None, ""
+def find_kif_list(kif_dir: Path) -> list[Path]:
+    """日付が新しい順に KIF ファイルのリストを返す"""
+    dated = []
     for kif in sorted(kif_dir.glob("*.kif")):
         content = kif.read_text(encoding="utf-8", errors="replace")
+        date = ""
         for line in content.split("\n")[:15]:
             if "開始日時" in line:
                 date = line.split("：", 1)[-1].strip()
-                if date > best_date:
-                    best_date, best = date, kif
                 break
-    return best
+        dated.append((date, kif))
+    dated.sort(reverse=True)
+    return [kif for _, kif in dated]
 
 
 def parse_kif(kif_text: str) -> dict:
     """KIF テキストを解析してゲーム情報を返す"""
     result = shogi.KIF.Parser.parse_str(kif_text)
-    # parse_str はリストを返す場合とdictを返す場合がある
     if isinstance(result, list):
         return result[0] if result else {}
     return result
+
+
+def extract_moves(raw_moves: list) -> list:
+    """raw_moves から有効な手のみを抽出する。
+    python-shogi のバージョンやKIFフォーマットによって
+    手の型が異なるため、複数の戦略を試みる。
+    """
+    # 戦略1: to_square 属性を持つオブジェクト (Move object)
+    moves = [m for m in raw_moves if hasattr(m, 'to_square')]
+    if moves:
+        return moves
+
+    # 戦略2: 整数 (integer encoding)
+    moves = [m for m in raw_moves if isinstance(m, int)]
+    if moves:
+        return moves
+
+    # 戦略3: 文字列以外 (None や特殊オブジェクト除外)
+    moves = [m for m in raw_moves if not isinstance(m, str) and m is not None]
+    return moves
 
 
 def main():
@@ -141,25 +161,43 @@ def main():
     args = parser.parse_args()
 
     if args.kif:
-        kif_path = Path(args.kif)
+        kif_candidates = [Path(args.kif)]
     elif args.kif_dir:
-        kif_path = find_latest_kif(Path(args.kif_dir))
-        if not kif_path:
+        kif_candidates = find_kif_list(Path(args.kif_dir))
+        if not kif_candidates:
             sys.exit("KIF ファイルが見つかりません")
-        print(f"最新棋譜: {kif_path.name}")
+        print(f"候補棋譜: {len(kif_candidates)}件", flush=True)
     else:
         sys.exit("--kif または --kif-dir を指定してください")
 
-    kif_text = kif_path.read_text(encoding="utf-8", errors="replace")
-    game = parse_kif(kif_text)
-    # python-shogi は moves を shogi.Move オブジェクトのリストで返す
-    # 投了等の特殊手は文字列として混入することがあるため、to_square 属性を持つもののみ使用
-    raw_moves = game.get("moves", [])
-    moves = [m for m in raw_moves if hasattr(m, 'to_square')]
-    names = game.get("names", [])
+    # 有効な手を持つKIFファイルを探す
+    kif_path = None
+    kif_text = ""
+    game = {}
+    moves = []
 
-    if not moves:
-        sys.exit("棋譜に手が含まれていません")
+    for candidate in kif_candidates[:10]:  # 最大10件まで試す
+        text = candidate.read_text(encoding="utf-8", errors="replace")
+        g = parse_kif(text)
+        raw = g.get("moves", [])
+        m = extract_moves(raw)
+
+        if m:
+            kif_path, kif_text, game, moves = candidate, text, g, m
+            print(f"最新棋譜: {candidate.name} ({len(moves)}手)", flush=True)
+            break
+        else:
+            # デバッグ: なぜ手が取れないか表示
+            types_str = ", ".join(
+                f"{type(x).__name__}={repr(x)[:30]}"
+                for x in raw[:3]
+            ) if raw else "empty"
+            print(f"スキップ: {candidate.name} (raw={len(raw)}件, [{types_str}])", flush=True)
+
+    if kif_path is None or not moves:
+        sys.exit("有効な棋譜が見つかりません (10件チェック済み)")
+
+    names = game.get("names", [])
 
     # python-shogi は names をリスト [black_name, white_name] で返す
     if isinstance(names, list):
@@ -198,7 +236,12 @@ def main():
         score = to_black(engine.eval(board.sfen()), turn)
         move_records.append((i + 1, turn, kif_label))
         evals.append(score)
-        board.push(move)
+
+        try:
+            board.push(move)
+        except Exception as e:
+            print(f"  Warning: 手{i+1}適用失敗 ({e}), 解析を途中で終了", flush=True)
+            break
 
         if (i + 1) % 20 == 0:
             pct = int((i + 1) / len(moves) * 100)
@@ -237,7 +280,7 @@ def main():
     lines.append("  将棋棋譜解析レポート")
     lines.append(f"  棋譜: {kif_path.name}")
     lines.append(f"  先手: {black_name}  後手: {white_name}")
-    lines.append(f"  日付: {date_str}  手数: {len(moves)}手")
+    lines.append(f"  日付: {date_str}  手数: {len(move_records)}手")
     lines.append(f"  エンジン: Fairy-Stockfish  解析: {args.movetime}ms/手")
     lines.append("=" * 62)
 
