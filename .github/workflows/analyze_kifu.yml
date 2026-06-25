@@ -11,6 +11,10 @@ on:
         description: 'スキップする棋譜数 (0=最新, 1=2番目に新しい, 2=3番目...)'
         required: false
         default: '0'
+      kif_id:
+        description: '対局IDを直接指定 (例: LUA8QQ)。指定すると kif_skip より優先'
+        required: false
+        default: ''
 
 jobs:
   analyze:
@@ -56,14 +60,26 @@ jobs:
         run: |
           MOVETIME="${{ inputs.movetime || '1000' }}"
           KIF_SKIP="${{ inputs.kif_skip || '0' }}"
-          echo "解析開始 (movetime=${MOVETIME}ms/手, skip=${KIF_SKIP})"
-          python3 analyze_kifu.py \
-            --engine ./fairy-stockfish \
-            --kif-dir kifu_files/ \
-            --output analysis_report.txt \
-            --output-kif analyzed_game.kif \
-            --movetime "$MOVETIME" \
-            --skip "$KIF_SKIP"
+          KIF_ID="${{ inputs.kif_id || '' }}"
+          if [ -n "$KIF_ID" ]; then
+            KIF_FILE="kifu_files/${KIF_ID}.kif"
+            echo "解析開始 (movetime=${MOVETIME}ms/手, kif_id=${KIF_ID})"
+            python3 analyze_kifu.py \
+              --engine ./fairy-stockfish \
+              --kif "$KIF_FILE" \
+              --output analysis_report.txt \
+              --output-kif analyzed_game.kif \
+              --movetime "$MOVETIME"
+          else
+            echo "解析開始 (movetime=${MOVETIME}ms/手, skip=${KIF_SKIP})"
+            python3 analyze_kifu.py \
+              --engine ./fairy-stockfish \
+              --kif-dir kifu_files/ \
+              --output analysis_report.txt \
+              --output-kif analyzed_game.kif \
+              --movetime "$MOVETIME" \
+              --skip "$KIF_SKIP"
+          fi
 
       - name: 解析レポートを Artifact として保存
         uses: actions/upload-artifact@v4
