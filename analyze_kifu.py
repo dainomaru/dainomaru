@@ -466,9 +466,13 @@ def main():
     parser.add_argument("--output",       default="analysis_report.txt")
     parser.add_argument("--output-kif",  default="analyzed_game.kif")
     parser.add_argument("--output-graph", default="evaluation_graph.html")
-    parser.add_argument("--movetime",    type=int, default=1000, help="1手あたり解析時間 (ms)")
-    parser.add_argument("--multipv",     type=int, default=10,  help="MultiPV 候補数")
-    parser.add_argument("--skip",        type=int, default=0,   help="スキップする有効棋譜数 (0=最新, 1=2番目に新しい, ...)")
+    parser.add_argument("--movetime",       type=int, default=1000, help="1手あたり解析時間 (ms)")
+    parser.add_argument("--multipv",        type=int, default=10,  help="MultiPV 候補数")
+    parser.add_argument("--skip",           type=int, default=0,   help="スキップする有効棋譜数 (0=最新, 1=2番目に新しい, ...)")
+    parser.add_argument("--target-moves",   type=int, default=0,
+                        help="この手数に近い最新棋譜を選択 (例: 130。0=無効。--skip より優先)")
+    parser.add_argument("--moves-tolerance", type=int, default=10,
+                        help="--target-moves の許容誤差 (デフォルト: ±10手)")
     args = parser.parse_args()
 
     if args.kif:
@@ -487,30 +491,61 @@ def main():
     moves = []
     valid_count = 0
 
-    for candidate in kif_candidates[:max(10, args.skip + 5)]:
-        text = candidate.read_text(encoding="utf-8", errors="replace")
-        g = parse_kif(text)
-        raw = g.get("moves", [])
-        m = extract_moves(raw)
+    target = args.target_moves
+    tolerance = args.moves_tolerance
 
-        if m:
-            if valid_count < args.skip:
-                valid_count += 1
-                print(f"スキップ({valid_count}/{args.skip}): {candidate.name} ({len(m)}手)", flush=True)
+    if target > 0:
+        # 全候補を日付の新しい順にスキャンし、手数が target±tolerance に収まる最初の棋譜を選択
+        print(f"手数フィルタ: {target}手 ±{tolerance} の最新棋譜を検索中 ({len(kif_candidates)}件)", flush=True)
+        for candidate in kif_candidates:
+            text = candidate.read_text(encoding="utf-8", errors="replace")
+            g = parse_kif(text)
+            raw = g.get("moves", [])
+            m = extract_moves(raw)
+
+            if not m:
+                types_str = ", ".join(
+                    f"{type(x).__name__}={repr(x)[:30]}"
+                    for x in raw[:3]
+                ) if raw else "empty"
+                print(f"  スキップ: {candidate.name} (raw={len(raw)}件, [{types_str}])", flush=True)
                 continue
-            kif_path, kif_text, game, moves = candidate, text, g, m
-            ordinal = f"{args.skip + 1}番目に新しい" if args.skip > 0 else "最新"
-            print(f"{ordinal}棋譜: {candidate.name} ({len(moves)}手)", flush=True)
-            break
-        else:
-            types_str = ", ".join(
-                f"{type(x).__name__}={repr(x)[:30]}"
-                for x in raw[:3]
-            ) if raw else "empty"
-            print(f"スキップ: {candidate.name} (raw={len(raw)}件, [{types_str}])", flush=True)
 
-    if kif_path is None or not moves:
-        sys.exit(f"有効な棋譜が見つかりません (skip={args.skip})")
+            diff = abs(len(m) - target)
+            if diff <= tolerance:
+                kif_path, kif_text, game, moves = candidate, text, g, m
+                print(f"  選択: {candidate.name} ({len(moves)}手, 差={diff}手)", flush=True)
+                break
+            else:
+                print(f"  除外: {candidate.name} ({len(m)}手, 差={diff}手 > {tolerance})", flush=True)
+
+        if kif_path is None or not moves:
+            sys.exit(f"有効な棋譜が見つかりません (target_moves={target}, tolerance={tolerance})")
+    else:
+        for candidate in kif_candidates[:max(10, args.skip + 5)]:
+            text = candidate.read_text(encoding="utf-8", errors="replace")
+            g = parse_kif(text)
+            raw = g.get("moves", [])
+            m = extract_moves(raw)
+
+            if m:
+                if valid_count < args.skip:
+                    valid_count += 1
+                    print(f"スキップ({valid_count}/{args.skip}): {candidate.name} ({len(m)}手)", flush=True)
+                    continue
+                kif_path, kif_text, game, moves = candidate, text, g, m
+                ordinal = f"{args.skip + 1}番目に新しい" if args.skip > 0 else "最新"
+                print(f"{ordinal}棋譜: {candidate.name} ({len(moves)}手)", flush=True)
+                break
+            else:
+                types_str = ", ".join(
+                    f"{type(x).__name__}={repr(x)[:30]}"
+                    for x in raw[:3]
+                ) if raw else "empty"
+                print(f"スキップ: {candidate.name} (raw={len(raw)}件, [{types_str}])", flush=True)
+
+        if kif_path is None or not moves:
+            sys.exit(f"有効な棋譜が見つかりません (skip={args.skip})")
 
     names = game.get("names", [])
     if isinstance(names, list):

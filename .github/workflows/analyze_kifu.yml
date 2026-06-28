@@ -12,9 +12,17 @@ on:
         required: false
         default: '0'
       kif_id:
-        description: '対局IDを直接指定 (例: LUA8QQ)。指定すると kif_skip より優先'
+        description: '対局IDを直接指定 (例: LUA8QQ)。指定すると kif_skip/target_moves より優先'
         required: false
         default: ''
+      target_moves:
+        description: '手数でフィルタ (例: 130 → 130手前後の最新棋譜を選択。0=無効)'
+        required: false
+        default: '0'
+      moves_tolerance:
+        description: 'target_moves の許容誤差 (デフォルト: ±10手)'
+        required: false
+        default: '10'
 
 jobs:
   analyze:
@@ -61,6 +69,8 @@ jobs:
           MOVETIME="${{ inputs.movetime || '1000' }}"
           KIF_SKIP="${{ inputs.kif_skip || '0' }}"
           KIF_ID="${{ inputs.kif_id || '' }}"
+          TARGET_MOVES="${{ inputs.target_moves || '0' }}"
+          MOVES_TOLERANCE="${{ inputs.moves_tolerance || '10' }}"
           if [ -n "$KIF_ID" ]; then
             KIF_FILE="kifu_files/${KIF_ID}.kif"
             echo "解析開始 (movetime=${MOVETIME}ms/手, kif_id=${KIF_ID})"
@@ -70,6 +80,16 @@ jobs:
               --output analysis_report.txt \
               --output-kif analyzed_game.kif \
               --movetime "$MOVETIME"
+          elif [ "$TARGET_MOVES" != "0" ]; then
+            echo "解析開始 (movetime=${MOVETIME}ms/手, target_moves=${TARGET_MOVES}±${MOVES_TOLERANCE})"
+            python3 analyze_kifu.py \
+              --engine ./fairy-stockfish \
+              --kif-dir kifu_files/ \
+              --output analysis_report.txt \
+              --output-kif analyzed_game.kif \
+              --movetime "$MOVETIME" \
+              --target-moves "$TARGET_MOVES" \
+              --moves-tolerance "$MOVES_TOLERANCE"
           else
             echo "解析開始 (movetime=${MOVETIME}ms/手, skip=${KIF_SKIP})"
             python3 analyze_kifu.py \

@@ -53,5 +53,20 @@ run.sh                    # ローカル実行用シェルスクリプト
 | `dainomaru_kifu.zip` | 全棋譜 ZIP |
 
 - エンコード: UTF-8 with BOM（文字化け対策済み）
-- ブランチ: `claude/shogi-81dojo-analysis-019qha`
 - エンジン: Fairy-Stockfish largeboard（UCI_Variant shogi）
+
+## 棋譜選択オプション（analyze_kifu.yml）
+
+| パラメータ | デフォルト | 説明 |
+|-----------|-----------|------|
+| `movetime` | 1000 | 1手あたり解析時間 (ms) |
+| `kif_id` | (空) | 対局IDを直接指定（最優先） |
+| `target_moves` | 0 | **手数フィルタ**。例: `130` → 130手前後の最新棋譜を選択 |
+| `moves_tolerance` | 10 | `target_moves` の許容誤差（±10手） |
+| `kif_skip` | 0 | 新しい順に N 件スキップ |
+
+### 使用例
+
+- **130手前後の棋譜を解析**: `target_moves=130`, `moves_tolerance=10`
+- **特定の対局を解析**: `kif_id=XAHvdg`
+- **2番目に新しい棋譜**: `kif_skip=1`
